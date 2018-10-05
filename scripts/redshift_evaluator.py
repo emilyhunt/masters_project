@@ -9,8 +9,8 @@ from scipy.io.idl import readsav as scipy_readsav
 from matplotlib import rc
 
 # Make TeX labels work on plots
-#rc('font',**{'family':'serif','serif':['Palatino']})
-#rc('text', usetex=True)
+rc('font', **{'family': 'serif', 'serif': ['Palatino']})
+rc('text', usetex=True)
 
 
 def read_save(target, columns_to_keep=None):
@@ -38,12 +38,14 @@ def read_save(target, columns_to_keep=None):
 def plot_phot_vs_spec(spectroscopic_z, photometric_z, fig_name='phot_vs_spec.png', NMAD=None):
     """Plots photometric redshift against spectroscopic for analysis."""
     # Plot data points and a y=x bisector
-    plt.plot(spectroscopic_z, photometric_z, 'r.', ms=3, alpha=0.5)
+    plt.figure()
+    plt.plot(spectroscopic_z, photometric_z, 'r.', ms=2, alpha=0.2)
     plt.plot([-1, 10], [-1, 10], 'k--', lw=1)
 
     # Add the NMAD to the plot if it has been specified by the user
     if type(NMAD) != type(None):
-        plt.text(3, 0, 'NMAD = {:.4f}'.format(NMAD))
+        plt.text(1, 6.5, 'NMAD = {:.4f}'.format(NMAD), ha='center', va='center',
+                 bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
 
     # Make it pwetty
     plt.xlim([-0.5, 7])
@@ -104,16 +106,34 @@ def find_pairs_on_sky(ra, dec, separation=1.0, save_location='/../output/', outp
 
 def plot_pair_redshift_deviation(my_redshifts, my_galaxy_pairs):
     """Compares the difference in redshift between sky pairs and plots."""
-    # Calculate redshift difference
-    redshift_difference = np.asarray(my_redshifts)[my_galaxy_pairs[:, 0]] - np.asarray(my_redshifts)[my_galaxy_pairs[:, 1]]
+    # Cast my_redshifts as a numpy array
+    my_redshifts = np.asarray(my_redshifts)
 
-    print(redshift_difference)
+    # Find all the pairs that don't contain any invalid redshifts (aka -99)
+    valid = np.where(np.logical_and(my_redshifts[my_galaxy_pairs[:, 0]] >= 0,
+                                    my_redshifts[my_galaxy_pairs[:, 1]] >= 0))[0]
+
+    # Calculate redshift difference
+    redshift_difference = my_redshifts[my_galaxy_pairs[valid, 0]] - my_redshifts[my_galaxy_pairs[valid, 1]]
+
+    # Do a bit of maths on the mean bin value and standard deviation
+    mean_difference = np.mean(redshift_difference)
+    std_dev_difference = np.std(redshift_difference)
 
     # Make a histogram plot
+    plt.figure()
     plt.hist(redshift_difference, bins='auto', color='r')
 
+    # Pop some data on the plot
+    plt.text(2, 1000, r'$\bar{ \Delta z}$ = '
+                      + r'{:.4f}'.format(mean_difference)
+                      + '\n' + r'$\sigma_{ \Delta z}$ = '
+                      + r'{:.4f}'.format(std_dev_difference),
+             ha='center', va='center',
+             bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0)))
+
     # Prettify & show the plot
-    plt.xlabel('Delta z')
+    plt.xlabel(r'$\Delta z$')
     plt.ylabel(r'$N_{pairs}$')
     plt.show()
     return 0
@@ -143,10 +163,7 @@ if __name__ == '__main__':
     plot_phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], NMAD=my_NMAD)
 
     # Find all galaxy pairs
-    galaxy_pairs = find_pairs_on_sky(redshifts['gs4_ra'], redshifts['gs4_dec'], separation=2)
+    galaxy_pairs = find_pairs_on_sky(redshifts['gs4_ra'], redshifts['gs4_dec'], separation=2.0)
 
     # Make a plot of Npairs against deltaZ
     plot_pair_redshift_deviation(redshifts['gs4_zphot'], galaxy_pairs)
-
-
-
