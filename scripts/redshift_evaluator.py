@@ -1,11 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import sys
 from astropy.coordinates import SkyCoord
 from astropy.coordinates import search_around_sky
 from astropy import units as u
 from scipy.io.idl import readsav as scipy_readsav
+from scipy.stats import norm
 from matplotlib import rc
 
 # Make TeX labels work on plots
@@ -113,8 +113,10 @@ def plot_pair_redshift_deviation(my_redshifts, my_galaxy_pairs):
     valid = np.where(np.logical_and(my_redshifts[my_galaxy_pairs[:, 0]] >= 0,
                                     my_redshifts[my_galaxy_pairs[:, 1]] >= 0))[0]
 
-    # Calculate redshift difference
-    redshift_difference = my_redshifts[my_galaxy_pairs[valid, 0]] - my_redshifts[my_galaxy_pairs[valid, 1]]
+    # Calculate redshift difference over 1 add the mean redshift for that galaxy
+    z1 = my_redshifts[my_galaxy_pairs[valid, 0]]
+    z2 = my_redshifts[my_galaxy_pairs[valid, 1]]
+    redshift_difference = (z1 - z2) / (1 + 0.5*(z1 + z2))
 
     # Do a bit of maths on the mean bin value and standard deviation
     mean_difference = np.mean(redshift_difference)
@@ -122,19 +124,28 @@ def plot_pair_redshift_deviation(my_redshifts, my_galaxy_pairs):
 
     # Make a histogram plot
     plt.figure()
-    plt.hist(redshift_difference, bins='auto', color='r')
+    bin_values, bin_edges, patches = plt.hist(redshift_difference, bins='auto', color='0.5', label='Real distribution',
+                                              density=True)
+
+    # Overplot a Gaussian
+    x_range = np.linspace(bin_edges[0] - 0.2, bin_edges[-1] + 0.2, num=100)  # Change num to change resolution
+    y_range = norm.pdf(x_range, loc=mean_difference, scale=std_dev_difference)
+    plt.plot(x_range, y_range, 'r-', label='Gaussian fit')
 
     # Pop some data on the plot
-    plt.text(2, 1000, r'$\bar{ \Delta z}$ = '
-                      + r'{:.4f}'.format(mean_difference)
-                      + '\n' + r'$\sigma_{ \Delta z}$ = '
-                      + r'{:.4f}'.format(std_dev_difference),
-             ha='center', va='center',
-             bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0)))
+    plt.text(np.min(bin_edges), np.max(bin_values),
+             r'$mean(\Delta z_{norm})$ = '
+             + r'{:.4f}'.format(mean_difference)
+             + '\n' + r'$\sigma_{ \Delta z}$ = '
+             + r'{:.4f}'.format(std_dev_difference),
+             ha='left', va='top',
+             bbox=dict(boxstyle='round', ec='k', fc='w'))
 
     # Prettify & show the plot
-    plt.xlabel(r'$\Delta z$')
-    plt.ylabel(r'$N_{pairs}$')
+    plt.xlabel(r'$\Delta z_{norm}$')
+    plt.ylabel(r'$p(\Delta z_{norm})$')
+    plt.xlim(bin_edges[0] - 0.2, bin_edges[-1] + 0.2)
+    plt.legend(edgecolor='k', facecolor='w', fancybox=True)
     plt.show()
     return 0
 
@@ -160,10 +171,14 @@ if __name__ == '__main__':
     my_NMAD = calc_normalised_median_abs_deviation(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
 
     # Make a plot of the photometric redshifts against spectroscopic
-    plot_phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], NMAD=my_NMAD)
+    #plot_phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], NMAD=my_NMAD)
+
+    # Cull redshifts if desired
+    small_redshifts = np.where(np.logical_and(redshifts['gs4_zphot'] < 200.0, redshifts['gs4_zphot'] > -100.0))[0]
 
     # Find all galaxy pairs
-    galaxy_pairs = find_pairs_on_sky(redshifts['gs4_ra'], redshifts['gs4_dec'], separation=2.0)
+    galaxy_pairs = find_pairs_on_sky(redshifts['gs4_ra'][small_redshifts],
+                                     redshifts['gs4_dec'][small_redshifts], separation=10.0)
 
     # Make a plot of Npairs against deltaZ
-    plot_pair_redshift_deviation(redshifts['gs4_zphot'], galaxy_pairs)
+    plot_pair_redshift_deviation(redshifts['gs4_zphot'][small_redshifts], galaxy_pairs)
