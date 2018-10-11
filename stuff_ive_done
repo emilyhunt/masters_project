@@ -1,3 +1,33 @@
+Questions:
+> How can we train using spectroscopic redshifts given that a reasonable fraction of them are outliers?
+> How can we deal with interstellar extinction best?
+> An apparent magnitude prior seems like a good shout/maybe the NN will work this out
+
+---- ---- ---- ---- ----
+
+10/10/18
+- Fuck BUCS lol, moving my shit!!1!
+- Fixed the above
+- Finished reading Brammer. Lots of useful stuff has come from reading it methinks.
+- Started reading Quadri
+
+
+09/10/18
+- Worked on IMI poster again (u lazy aha)
+- 
+
+08/10/18
+- More of Brammer
+- Worked on my IMI poster instead
+
+---- Week II ----
+
+
+05/10/18
+- Sorted Npairs vs deltaZ
+- Now also overplotting a Gaussian
+- Started reading Brammer, Quadri
+
 04/10/18
 - Done the zphot vs zspec plot
 - Almost there on Npairs vs deltaZ, just need to make sure no invalid redshifts get added
@@ -12,5 +42,4 @@
 01/10/18
 - Got some of the ssh stuff working
 
-
----- Week 1 ----
+---- Week I ----
