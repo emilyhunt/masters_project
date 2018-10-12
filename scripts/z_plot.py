@@ -1,22 +1,17 @@
 """Various plotting tools for redshift analysis, to be used extensively with z_util.py."""
 
-# Lets us actually import local packages
-import sys
-sys.path.append('.')
-
-# Now, the legit imports
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 from matplotlib import rc
-import z_util
+from scripts import z_util
 
 # Make TeX labels work on plots
 rc('font', **{'family': 'serif', 'serif': ['Palatino']})
 rc('text', usetex=True)
 
 
-def phot_vs_spec(spectroscopic_z, photometric_z, fig_name='phot_vs_spec.png', NMAD=None):
+def phot_vs_spec(spectroscopic_z, photometric_z, fig_name='phot_vs_spec.png', nmad=None):
     """Plots photometric redshift against spectroscopic for analysis."""
     # Plot data points and a y=x bisector
     plt.figure()
@@ -24,8 +19,8 @@ def phot_vs_spec(spectroscopic_z, photometric_z, fig_name='phot_vs_spec.png', NM
     plt.plot([-1, 10], [-1, 10], 'k--', lw=1)
 
     # Add the NMAD to the plot if it has been specified by the user
-    if type(NMAD) != type(None):
-        plt.text(1, 6.5, 'NMAD = {:.4f}'.format(NMAD), ha='center', va='center',
+    if nmad is not None:
+        plt.text(1, 6.5, 'NMAD = {:.4f}'.format(nmad), ha='center', va='center',
                  bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
 
     # Make it pwetty
@@ -104,17 +99,18 @@ if __name__ == '__main__':
     redshifts['gs4_dec'] = coords['gs4_dec']
 
     # Calculate the NMAD
-    my_NMAD = z_util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
+    # my_nmad = z_util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
 
     # Make a plot of the photometric redshifts against spectroscopic
-    phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], NMAD=my_NMAD)
+    # phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], nmad=my_nmad)
 
     # Cull redshifts if desired
     small_redshifts = np.where(np.logical_and(redshifts['gs4_zphot'] < 200.0, redshifts['gs4_zphot'] > -100.0))[0]
 
     # Find all galaxy pairs
-    galaxy_pairs = z_util.store_pairs_on_sky([redshifts['gs4_ra'][small_redshifts],
-                                              redshifts['gs4_dec'][small_redshifts]], min_sep=10.0)
+    all_galaxy_pairs, random_galaxy_pairs = z_util.store_pairs_on_sky([redshifts['gs4_ra'][small_redshifts],
+                                              redshifts['gs4_dec'][small_redshifts]],
+                                             max_separation=15., min_separation=3.)
 
     # Make a plot of Npairs against deltaZ
-    pair_redshift_deviation(redshifts['gs4_zphot'][small_redshifts], galaxy_pairs)
+    pair_redshift_deviation(redshifts['gs4_zphot'][small_redshifts], all_galaxy_pairs)
