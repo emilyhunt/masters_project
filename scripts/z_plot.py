@@ -35,46 +35,79 @@ def phot_vs_spec(spectroscopic_z, photometric_z, fig_name='phot_vs_spec.png', nm
     return 0
 
 
-def pair_redshift_deviation(my_redshifts, my_galaxy_pairs):
+def sky_locations(ra, dec):
+    """Plots the sky locations of all galaxies requested, allowing for analysis of their place in space."""
+    # Setup our projection
+    plt.figure()
+
+    # Data plotting and grid showing
+    plt.plot(ra, dec, 'r.', ms=2, alpha=0.2)
+
+    # Beautifying
+    plt.xlabel('Right ascension')
+    plt.ylabel('Declination')
+    plt.show()
+    return 0
+
+
+def pair_redshift_deviation(my_redshifts, my_all_galaxy_pairs, my_random_galaxy_pairs):
     """Compares the difference in redshift between sky pairs and plots."""
     # Cast my_redshifts as a numpy array
     my_redshifts = np.asarray(my_redshifts)
 
     # Find all the pairs that don't contain any invalid redshifts (aka -99)
-    valid = np.where(np.logical_and(my_redshifts[my_galaxy_pairs[:, 0]] >= 0,
-                                    my_redshifts[my_galaxy_pairs[:, 1]] >= 0))[0]
+    all_valid = np.where(np.logical_and(my_redshifts[my_all_galaxy_pairs[:, 0]] > 0,
+                                        my_redshifts[my_all_galaxy_pairs[:, 1]] > 0))[0]
+    random_valid = np.where(np.logical_and(my_redshifts[my_random_galaxy_pairs[:, 0]] > 0,
+                                           my_redshifts[my_random_galaxy_pairs[:, 1]] > 0))[0]
 
-    # Calculate redshift difference over 1 add the mean redshift for that galaxy
-    z1 = my_redshifts[my_galaxy_pairs[valid, 0]]
-    z2 = my_redshifts[my_galaxy_pairs[valid, 1]]
-    redshift_difference = (z1 - z2) / (1 + 0.5*(z1 + z2))
+    # Calculate redshift difference over (1 add the mean redshift) for that galaxy
+    z1 = my_redshifts[my_all_galaxy_pairs[all_valid, 0]]
+    z2 = my_redshifts[my_all_galaxy_pairs[all_valid, 1]]
+    all_redshift_difference = (z1 - z2) / (1 + 0.5*(z1 + z2))
 
-    # Do a bit of maths on the mean bin value and standard deviation
-    mean_difference = np.mean(redshift_difference)
-    std_dev_difference = np.std(redshift_difference)
+    # Again for the random data set
+    z1 = my_redshifts[my_random_galaxy_pairs[random_valid, 0]]
+    z2 = my_redshifts[my_random_galaxy_pairs[random_valid, 1]]
+    random_redshift_difference = (z1 - z2) / (1 + 0.5 * (z1 + z2))
+
+    # Histogram the different redshift pairs
+    all_redshifts_binned, bin_edges = np.histogram(all_redshift_difference, bins='auto')
+    random_redshifts_binned, bin_edges = np.histogram(random_redshift_difference, bins=bin_edges)
+
+    # Subtract one from the other to get an estimate of the physical pair number, also it's normalised
+    physical_redshifts_binned = all_redshifts_binned - all_valid.size / random_valid.size * random_redshifts_binned
+
+    # Work out the centre of the bins: by adding half of the bin spacing to all but the last bin edge
+    bin_centres = bin_edges[:-1] + (bin_edges[1] - bin_edges[0]) / 2
+
+    # Do a bit of maths on the mean bin value and standard deviation  todo: a Gaussian fit!
+    mean_difference = -99
+    std_dev_difference = -99
 
     # Make a histogram plot
     plt.figure()
-    bin_values, bin_edges, patches = plt.hist(redshift_difference, bins='auto', color='0.5', label='Real distribution',
-                                              density=True)
+    plt.plot(bin_centres, physical_redshifts_binned, 'k-', ms=3, label='Real distribution')
+    plt.plot(bin_centres, all_redshifts_binned, 'r--', ms=3, label='All distribution')
+    plt.plot(bin_centres, random_redshifts_binned, 'b--', ms=3, label='Random distribution')
 
     # Overplot a Gaussian
-    x_range = np.linspace(bin_edges[0] - 0.2, bin_edges[-1] + 0.2, num=100)  # Change num to change resolution
-    y_range = norm.pdf(x_range, loc=mean_difference, scale=std_dev_difference)
-    plt.plot(x_range, y_range, 'r-', label='Gaussian fit')
+    #x_range = np.linspace(bin_edges[0] - 0.2, bin_edges[-1] + 0.2, num=100)  # Change num to change resolution
+    #y_range = norm.pdf(x_range, loc=mean_difference, scale=std_dev_difference)
+    #plt.plot(x_range, y_range, 'r-', label='Gaussian fit')
 
     # Pop some data on the plot
-    plt.text(np.min(bin_edges), np.max(bin_values),
-             r'$mean(\Delta z_{norm})$ = '
-             + r'{:.4f}'.format(mean_difference)
-             + '\n' + r'$\sigma_{ \Delta z}$ = '
-             + r'{:.4f}'.format(std_dev_difference),
-             ha='left', va='top',
-             bbox=dict(boxstyle='round', ec='k', fc='w'))
+    #plt.text(np.min(bin_edges), np.max(physical_redshifts_binned),
+    #         r'$mean(\Delta z / 1 + z_{mean})$ = '
+    #         + r'{:.4f}'.format(mean_difference)
+    #         + '\n' + r'$\sigma_{ \Delta z}$ = '
+    #         + r'{:.4f}'.format(std_dev_difference),
+    #         ha='left', va='top',
+    #         bbox=dict(boxstyle='round', ec='k', fc='w'))
 
     # Prettify & show the plot
-    plt.xlabel(r'$\Delta z_{norm}$')
-    plt.ylabel(r'$p(\Delta z_{norm})$')
+    plt.xlabel(r'$\Delta z / 1 + z_{mean}$')
+    plt.ylabel(r'$N_{pairs}$')
     plt.xlim(bin_edges[0] - 0.2, bin_edges[-1] + 0.2)
     plt.legend(edgecolor='k', facecolor='w', fancybox=True)
     plt.show()
@@ -99,18 +132,25 @@ if __name__ == '__main__':
     redshifts['gs4_dec'] = coords['gs4_dec']
 
     # Calculate the NMAD
-    # my_nmad = z_util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
+    my_nmad = z_util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
 
     # Make a plot of the photometric redshifts against spectroscopic
-    # phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], nmad=my_nmad)
+    #phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], nmad=my_nmad)
+
+    # Make a plot of locations on the sky
+    #sky_locations(redshifts['gs4_ra'], redshifts['gs4_dec'])
 
     # Cull redshifts if desired
-    small_redshifts = np.where(np.logical_and(redshifts['gs4_zphot'] < 200.0, redshifts['gs4_zphot'] > -100.0))[0]
+    small_redshifts = np.where(np.logical_and(redshifts['gs4_zphot'] < 2, redshifts['gs4_zphot'] > 1.3))[0]
 
     # Find all galaxy pairs
-    all_galaxy_pairs, random_galaxy_pairs = z_util.store_pairs_on_sky([redshifts['gs4_ra'][small_redshifts],
-                                              redshifts['gs4_dec'][small_redshifts]],
-                                             max_separation=15., min_separation=3.)
+    #all_galaxy_pairs, random_galaxy_pairs = z_util.store_pairs_on_sky([redshifts['gs4_ra'][small_redshifts],
+    #                                          redshifts['gs4_dec'][small_redshifts]],
+    #                                         max_separation=15., min_separation=3.)
+
+    # Try reading in the pairs again to check the storing worked
+    all_galaxy_pairs_read_in = z_util.read_pairs(small_redshifts, '../data/all_pairs.dat')
+    random_galaxy_pairs_read_in = z_util.read_pairs(small_redshifts, '../data/random_pairs.dat')
 
     # Make a plot of Npairs against deltaZ
-    pair_redshift_deviation(redshifts['gs4_zphot'][small_redshifts], all_galaxy_pairs)
+    pair_redshift_deviation(redshifts['gs4_zphot'], all_galaxy_pairs_read_in, random_galaxy_pairs_read_in)

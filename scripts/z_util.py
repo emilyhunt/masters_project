@@ -68,22 +68,15 @@ def store_pairs_on_sky(catalogue, max_separation=15.0, min_separation=0.0,
 
     # Next, let's create a random catalogue of co-ordinates so we can make a set of projected pairs
     # First, some housekeeping
-    random_number_generator = np.random.RandomState(seed=random_seed)
-    catalogue_length = catalogue[0].size
-    random_catalogue = np.empty((2, catalogue_length))
+    np.random.seed(random_seed)
 
-    # Make a random catalogue with the same range in ra and dec as the original catalogue. Fyi the .rand method finds a
-    # uniform deviate in the range [0, 1], hence we multiply by the max-min window and add minimum to put the numbers
-    # in the range we want. =)
-    ra_max = catalogue[0].max()
-    ra_min = catalogue[0].min()
-    dec_max = catalogue[1].max()
-    dec_min = catalogue[1].min()
-    random_catalogue[0] = (ra_max - ra_min) * random_number_generator.rand(catalogue_length) + ra_min
-    random_catalogue[1] = (dec_max - dec_min) * random_number_generator.rand(catalogue_length) + dec_min
+    # Make a random catalogue by simply shuffling existing values. This ensures the random catalogue has an identical
+    # distribution of ras and decs, but all at random redshifts to isolate projected pairs.
+    np.random.shuffle(catalogue[0])
+    np.random.shuffle(catalogue[1])
 
     # Run find_pairs_on_sky now with the random fun times
-    random_pairs = find_pairs_on_sky(random_catalogue, max_separation, min_separation)
+    random_pairs = find_pairs_on_sky(catalogue, max_separation, min_separation)
 
     # Time to store this stuff
     np.savetxt(save_location + all_pairs_name, all_pairs, delimiter=',', fmt='%i')
@@ -135,7 +128,7 @@ def read_pairs(input_ids, pair_location):
     """
     # If the user has specified a file with a string, then we want to read that in
     if isinstance(pair_location, str):
-        matches1, matches2 = np.loadtxt(pair_location, delimiter=',', dtype=np.int64)
+        matches1, matches2 = np.loadtxt(pair_location, delimiter=',', dtype=np.int64, unpack=True)
 
     # Otherwise, pair_location should be a 2 x N_galaxies array that we get both rows of matches from
     else:
@@ -143,14 +136,14 @@ def read_pairs(input_ids, pair_location):
         matches2 = pair_location[1]
 
     # Find all instance of IDs in the matches arrays
-    id_1 = np.where(matches1 == input_ids)[0]
-    id_2 = np.where(matches2 == input_ids)[0]
+    id_1 = np.where(np.isin(matches1, input_ids))[0]
+    id_2 = np.where(np.isin(matches2, input_ids))[0]
 
     # Create a new shortened list of pairs that satisfy our input conditions.  We'll need to not only use ID matches to
     # grab our galaxies, but also grab the IDs of the galaxies they're paired with.  We'll keep every ID requested
     # galaxy in the first column, and every galaxy it matches with in the second.
-    paired_galaxies = np.empty(2, id_1.size + id_2.size)
+    paired_galaxies = np.empty((2, id_1.size + id_2.size), dtype=np.int64)
     paired_galaxies[0] = np.concatenate((matches1[id_1], matches2[id_2]))
     paired_galaxies[1] = np.concatenate((matches2[id_1], matches1[id_2]))
 
-    return paired_galaxies
+    return paired_galaxies.T
