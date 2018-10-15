@@ -52,16 +52,19 @@ def calculate_nmad(spectroscopic_z, photometric_z):
     return 1.4826 * np.median(np.abs((photometric_z[valid] - spectroscopic_z[valid]) / (1 + photometric_z[valid])))
 
 
-def store_pairs_on_sky(catalogue, max_separation=15.0, min_separation=0.0,
-                       save_location='../data/', random_seed=42, all_pairs_name='all_pairs.dat',
-                       random_pairs_name='random_pairs.dat'):
+def store_pairs_on_sky(ra, dec, max_separation=15.0, min_separation=0.0,
+                       save_location='../data/', random_seed=42, all_pairs_name='all_pairs.csv',
+                       random_pairs_name='random_pairs.csv', size_of_random_catalogue=5):
     """Wrapper for find_pairs_on_sky that finds physicalxprojected and just projected pairs, and then writes its
     findings to a file.
     """
     # Some shit about letting the user know what the code is doing
     print('Finding galaxy pairs within {} to {} arcseconds of each other.'.format(min_separation, max_separation))
-    print('There are {} galaxies to test.'.format(catalogue[0].size))
+    print('There are {} galaxies to test.'.format(ra.size))
     print('Please bear with, this could take some time!')
+
+    # Typecast the ra/dec catalogue objects as np arrays
+    catalogue = np.asarray([ra, dec])
 
     # First, let's find the union of physical and projected pairs
     all_pairs = find_pairs_on_sky(catalogue, max_separation, min_separation)
@@ -72,15 +75,19 @@ def store_pairs_on_sky(catalogue, max_separation=15.0, min_separation=0.0,
 
     # Make a random catalogue by simply shuffling existing values. This ensures the random catalogue has an identical
     # distribution of ras and decs, but all at random redshifts to isolate projected pairs.
-    np.random.shuffle(catalogue[0])
-    np.random.shuffle(catalogue[1])
+    np.random.shuffle(catalogue.T)
 
     # Run find_pairs_on_sky now with the random fun times
     random_pairs = find_pairs_on_sky(catalogue, max_separation, min_separation)
 
-    # Time to store this stuff
-    np.savetxt(save_location + all_pairs_name, all_pairs, delimiter=',', fmt='%i')
-    np.savetxt(save_location + random_pairs_name, random_pairs, delimiter=',', fmt='%i')
+    # Make the number of randomised pairs size_of_random_catalogue times larger, and shuffle the order of pairs too
+    # (shuffling the pairs order does nothing here, but does mean randomised redshifts will be picked later)
+    random_pairs = np.repeat(random_pairs, size_of_random_catalogue, axis=0)
+    np.random.shuffle(random_pairs.T)
+
+    # Time to store this stuff. We use pandas as it seems by far the fastest way.
+    pd.DataFrame(all_pairs).to_csv(save_location + all_pairs_name, index=False)
+    pd.DataFrame(random_pairs).to_csv(save_location + random_pairs_name, index=False)
 
     # Return the pairs just in case the user can't be bothered to re-load them lmao
     return [all_pairs, random_pairs]
@@ -128,7 +135,9 @@ def read_pairs(input_ids, pair_location):
     """
     # If the user has specified a file with a string, then we want to read that in
     if isinstance(pair_location, str):
-        matches1, matches2 = np.loadtxt(pair_location, delimiter=',', dtype=np.int64, unpack=True)
+        matches = pd.read_csv(pair_location).values
+        matches1 = matches[:, 0]
+        matches2 = matches[:, 1]
 
     # Otherwise, pair_location should be a 2 x N_galaxies array that we get both rows of matches from
     else:
