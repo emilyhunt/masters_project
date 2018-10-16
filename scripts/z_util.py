@@ -128,11 +128,15 @@ def find_pairs_on_sky(catalogue, max_separation=15.0, min_separation=0.0):
     return paired_galaxies
 
 
-def read_pairs(input_ids, pair_location):
+def read_pairs(pair_location, redshifts, min_redshift=0, max_redshift=100, absolute_min_redshift=0, input_ids=None):
     """Uses existing pair data files to quickly find pairs within specified categories. Takes pair_location as a string
-    pointing to a file, or as an array of galaxy pair IDs. It will search for instances of 'IDs' in the list of pairs.
-    If reading in as an array, it should have shape 2 x N_galaxies.
+    pointing to a file, or as an array of galaxy pair IDs. It will search for instances of 'IDs' in the list of pairs,
+    returning the ID and the galaxy it is paired in a long array of valid pairs. It also supports restricting the
+    redshift range. If reading IDs in as an array, it should have shape 2 x N_galaxies.
     """
+    # Typecast redshifts as a numpy array
+    redshifts = np.array(redshifts)
+
     # If the user has specified a file with a string, then we want to read that in
     if isinstance(pair_location, str):
         matches = pd.read_csv(pair_location).values
@@ -144,9 +148,18 @@ def read_pairs(input_ids, pair_location):
         matches1 = pair_location[0]
         matches2 = pair_location[1]
 
-    # Find all instance of IDs in the matches arrays
-    id_1 = np.where(np.isin(matches1, input_ids))[0]
-    id_2 = np.where(np.isin(matches2, input_ids))[0]
+    # If the user has given a specific list of ids then we'll want to use those - otherwise, just create a single long
+    # list of ids
+    if input_ids is None:
+        input_ids = np.arange(0, redshifts.size)
+
+    # Find all galaxies that are desired and in the correct redshift range
+    correct_z_input_ids = np.where(np.logical_and(redshifts[input_ids] < max_redshift,
+                                                  redshifts[input_ids] > min_redshift))[0]
+
+    # Find all instance of input IDs in the first and second columns of the pairs table (aka matches1 and matches2)
+    id_1 = np.where(np.isin(matches1, correct_z_input_ids))[0]
+    id_2 = np.where(np.isin(matches2, correct_z_input_ids))[0]
 
     # Create a new shortened list of pairs that satisfy our input conditions.  We'll need to not only use ID matches to
     # grab our galaxies, but also grab the IDs of the galaxies they're paired with.  We'll keep every ID requested
@@ -154,5 +167,9 @@ def read_pairs(input_ids, pair_location):
     paired_galaxies = np.empty((2, id_1.size + id_2.size), dtype=np.int64)
     paired_galaxies[0] = np.concatenate((matches1[id_1], matches2[id_2]))
     paired_galaxies[1] = np.concatenate((matches2[id_1], matches1[id_2]))
+
+    # Find all pair galaxies that are not below the absolute minimum redshift (aka they're -99 or similar)
+    incorrect_z_pair_ids = np.where(redshifts[paired_galaxies[1]] <= absolute_min_redshift)[0]
+    paired_galaxies = np.delete(paired_galaxies, incorrect_z_pair_ids, axis=1)
 
     return paired_galaxies.T
