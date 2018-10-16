@@ -51,6 +51,42 @@ def sky_locations(ra, dec):
     return 0
 
 
+def mean_redshifts_on_sky(ra, dec, my_redshifts, n_levels=50, grid_resolution=30):
+    """Makes a sky plot of the mean redshift in each"""
+    # Setup ranges
+    ra_res = dec_res = grid_resolution
+    ra_range = np.linspace(ra.min(), ra.max(), ra_res)
+    dec_range = np.linspace(dec.min(), dec.max(), dec_res)
+    ra_space = np.abs(ra_range[1] - ra_range[0])
+    dec_space = np.abs(dec_range[1] - dec_range[0])
+
+    # Make grid points for later
+    ra_grid, dec_grid = np.meshgrid(ra_range, dec_range)
+
+    # Cycle over the different grid points calculating the mean redshift in each place
+    mean_redshifts = np.zeros(ra_grid.shape)
+    i = 0
+    for a_ra in ra_range:
+        j = 0
+        for a_dec in dec_range:
+            good_ra = np.logical_and(ra < a_ra + ra_space, ra > a_ra)
+            good_dec = np.logical_and(dec < a_dec + dec_space, dec > a_dec)
+            good_zs = my_redshifts > 0
+            good_coords = np.logical_and(good_ra, good_dec)
+            good_final = np.logical_and(good_coords, good_zs)
+            mean_redshifts[i, j] = np.mean(my_redshifts[good_final])
+            j += 1
+        i += 1
+
+    # Output
+    plt.contourf(ra_grid, dec_grid, mean_redshifts.T, n_levels)
+    plt.xlabel('Right ascension')
+    plt.ylabel('Declination')
+    plt.colorbar()
+    plt.show()
+    return 0
+
+
 def single_gaussian_to_fit(x, standard_deviation, A):
     """Allows a Gaussian to be accessed to fit a curve to."""
     return A * norm.pdf(x, loc=0, scale=standard_deviation)
@@ -106,7 +142,7 @@ def fit_gaussians(x_range, y_range):
     return my_params
 
 
-def pair_redshift_deviation(my_redshifts, my_all_galaxy_pairs, my_random_galaxy_pairs, size_of_random_catalogue=5.):
+def pair_redshift_deviation(my_redshifts, my_all_galaxy_pairs, my_random_galaxy_pairs, size_of_random_catalogue=1.):
     """Compares the difference in redshift between sky pairs and plots."""
     # Cast my_redshifts as a numpy array and cast the random catalogue size as a float
     my_redshifts = np.asarray(my_redshifts)
@@ -122,13 +158,11 @@ def pair_redshift_deviation(my_redshifts, my_all_galaxy_pairs, my_random_galaxy_
     z1 = my_redshifts[my_all_galaxy_pairs[:, 0]]
     z2 = my_redshifts[my_all_galaxy_pairs[:, 1]]
     all_redshift_difference = (z1 - z2) / (1 + 0.5 * (z1 + z2))
-    print(all_redshift_difference.size)
 
     # Again for the random data set
     z1 = random_redshifts[my_random_galaxy_pairs[:, 0]]
     z2 = random_redshifts[my_random_galaxy_pairs[:, 1]]
     random_redshift_difference = (z1 - z2) / (1 + 0.5 * (z1 + z2))
-    print(random_redshift_difference.size)
 
     # Histogram the different redshift pairs. density=True on the random pairs bins sets the area under the histogram to
     # unity, so that we can later multiply it back up again with a normalisation factor.
@@ -136,12 +170,7 @@ def pair_redshift_deviation(my_redshifts, my_all_galaxy_pairs, my_random_galaxy_
     random_redshifts_binned, bin_edges = np.histogram(random_redshift_difference, bins=bin_edges, density=False)
 
     # Normalise the random redshifts by the factor of how many more there are vs real ones
-    #n_data_points = my_redshifts.size
-    #n_random_pairs_in_redshift_range = random_redshift_difference.size
-    #np.sort(my_random_galaxy_pairs, axis=1)  # Sort all galaxy pairs into lowest ID, highest ID
-    #n_unique_random_pairs = np.unique(np.sort(my_random_galaxy_pairs, axis=1), axis=0).size / 2
-    #n_unique_all_pairs = np.unique(np.sort(my_all_galaxy_pairs, axis=1), axis=0).size / 2
-    random_redshifts_binned = random_redshifts_binned * all_redshift_difference.size / random_redshift_difference.size
+    random_redshifts_binned = random_redshifts_binned / size_of_random_catalogue
 
     # Subtract one from the other to get an estimate of the physical pair number
     physical_redshifts_binned = all_redshifts_binned - random_redshifts_binned
@@ -211,53 +240,20 @@ if __name__ == '__main__':
     my_nmad = z_util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
 
     # Make a plot of the photometric redshifts against spectroscopic
-    #phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], nmad=my_nmad)
+    phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], nmad=my_nmad)
 
     # Remove everything within specific sky co-ordinates
-    # redshifts = redshifts.iloc[redshifts.gs4_ra.values < 53.1]
-
-    # Emily's diagnostic plot
-    ra_res = dec_res = 30
-    ra_range = np.linspace(redshifts.gs4_ra.values.min(), redshifts.gs4_ra.values.max(), ra_res)
-    dec_range = np.linspace(redshifts.gs4_dec.values.min(), redshifts.gs4_dec.values.max(), dec_res)
-    ra_space = np.abs(ra_range[1] - ra_range[0])
-    dec_space = np.abs(dec_range[1] - dec_range[0])
-
-    ra_grid, dec_grid = np.meshgrid(ra_range, dec_range)
-
-    mean_redshifts = np.zeros(ra_grid.shape)
-
-    i=0
-    for ra in ra_range:
-        j=0
-        for dec in dec_range:
-
-            good_ra = np.logical_and(redshifts.gs4_ra.values < ra + ra_space, redshifts.gs4_ra.values > ra)
-            good_dec = np.logical_and(redshifts.gs4_dec.values < dec + dec_space, redshifts.gs4_dec.values > dec)
-            good_zs = redshifts.gs4_zphot.values > 0
-            good_coords = np.logical_and(good_ra, good_dec)
-            good_final = np.logical_and(good_coords, good_zs)
-
-            mean_redshifts[i, j] = np.mean(redshifts.gs4_zphot.values[good_final])
-            j += 1
-        i += 1
-
-    plt.contourf(ra_grid, dec_grid, mean_redshifts.T, 50)
-    plt.xlabel('ra')
-    plt.ylabel('dec')
-    plt.colorbar()
-    plt.show()
-
+    #redshifts = redshifts.iloc[redshifts.gs4_ra.values < 53.1]
 
     # Make a plot of locations on the sky
     sky_locations(redshifts['gs4_ra'], redshifts['gs4_dec'])
 
-    """
     # Find all galaxy pairs
     random_catalogue_repeats = 1
     all_galaxy_pairs, random_galaxy_pairs = z_util.store_pairs_on_sky(redshifts['gs4_ra'][:],
                                                                       redshifts['gs4_dec'][:],
-                                                                      max_separation=5., min_separation=0.0,
+                                                                      max_separation=15., min_separation=0.0,
+                                                                      max_move=26, min_move=25,
                                                                       size_of_random_catalogue=random_catalogue_repeats)
 
     # Try reading in the pairs again to check the storing worked
@@ -267,9 +263,9 @@ if __name__ == '__main__':
                                                  min_redshift=min_z, max_redshift=max_z)
 
     random_galaxy_pairs_read_in = z_util.read_pairs('../data/random_pairs.csv', redshifts['gs4_zphot'],
-                                                    min_redshift=min_z, max_redshift=max_z)
+                                                    min_redshift=min_z, max_redshift=max_z,
+                                                    size_of_random_catalogue=random_catalogue_repeats)
 
     # Make a plot of Npairs against deltaZ
     pair_redshift_deviation(redshifts['gs4_zphot'], all_galaxy_pairs_read_in, random_galaxy_pairs_read_in,
                             size_of_random_catalogue=random_catalogue_repeats)
-    """

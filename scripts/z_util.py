@@ -54,7 +54,7 @@ def calculate_nmad(spectroscopic_z, photometric_z):
 
 def store_pairs_on_sky(ra, dec, max_separation=15.0, min_separation=0.0,
                        save_location='../data/', random_seed=42, all_pairs_name='all_pairs.csv',
-                       random_pairs_name='random_pairs.csv', size_of_random_catalogue=5):
+                       random_pairs_name='random_pairs.csv', size_of_random_catalogue=1, min_move=30, max_move=45):
     """Wrapper for find_pairs_on_sky that finds physicalxprojected and just projected pairs, and then writes its
     findings to a file.
     """
@@ -75,7 +75,16 @@ def store_pairs_on_sky(ra, dec, max_separation=15.0, min_separation=0.0,
 
     # Make a random catalogue by simply shuffling existing values. This ensures the random catalogue has an identical
     # distribution of ras and decs, but all at random redshifts to isolate projected pairs.
+    np.repeat(catalogue, size_of_random_catalogue, axis=1)
     np.random.shuffle(catalogue.T)
+
+    # We make a set of random numbers, between the minimum and maximum moves, and then multiply them by +1 or -1
+    random_numbers = (max_move - min_move) * np.random.rand(2, catalogue[0].size) + min_move
+    signs = np.random.rand(2, catalogue[0].size) - 0.5
+    random_numbers = random_numbers * np.where(signs > 0, 1, -1) / 60**2  # The 60^2 converts from arcsec to deg
+
+    # Now multiply the catalogue by said deviates, moving everything by between a minimum and maximum amount
+    catalogue = catalogue + random_numbers
 
     # Run find_pairs_on_sky now with the random fun times
     random_pairs = find_pairs_on_sky(catalogue, max_separation, min_separation)
@@ -128,14 +137,15 @@ def find_pairs_on_sky(catalogue, max_separation=15.0, min_separation=0.0):
     return paired_galaxies
 
 
-def read_pairs(pair_location, redshifts, min_redshift=0, max_redshift=100, absolute_min_redshift=0, input_ids=None):
+def read_pairs(pair_location, redshifts, min_redshift=0, max_redshift=100, absolute_min_redshift=0, input_ids=None,
+               size_of_random_catalogue=1):
     """Uses existing pair data files to quickly find pairs within specified categories. Takes pair_location as a string
     pointing to a file, or as an array of galaxy pair IDs. It will search for instances of 'IDs' in the list of pairs,
     returning the ID and the galaxy it is paired in a long array of valid pairs. It also supports restricting the
     redshift range. If reading IDs in as an array, it should have shape 2 x N_galaxies.
     """
     # Typecast redshifts as a numpy array
-    redshifts = np.array(redshifts)
+    redshifts = np.repeat(np.array(redshifts), size_of_random_catalogue)
 
     # If the user has specified a file with a string, then we want to read that in
     if isinstance(pair_location, str):
