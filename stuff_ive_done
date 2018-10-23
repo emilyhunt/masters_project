@@ -1,9 +1,37 @@
 Questions:
-> How can we train using spectroscopic redshifts given that a reasonable fraction of them are outliers?
 > How can we deal with interstellar extinction best?
 > An apparent magnitude prior seems like a good shout/maybe the NN will work this out
 
+
+Stuff I could do:
+> Make my own mixture density network api, consisting of a class that during initialisation makes an mdn to requisite specs
+  - this would make the code a shit ton more readable
+  - it would make it really easy to launch multiple graphs but comparing settings between them
+  - I need to change to using the 'with my_graph.as_default():' notation to help with this
+
 ---- ---- ---- ---- ----
+
+23/10/18
+- Got an MDN example working!!! YAY (maybe)
+- I had bigtime issues with tf.subtract() broadcasting not working. I *hope* that the cheeky fix I've done works.
+- I'm not currently reproducing loss functions as low as in the Edward example, so fingers crossed it's even actually working.
+
+
+
+
+22/10/18
+- Got the blog example running on my computer
+- Started investigating how MDNs work in tensorflow
+- Found quite a few useful packages but struggled to get inter-compatibility
+- Decided to plow on with using only tensorflow. It will be a bit harder but will save a hell of a lot of compatibility issues.
+- Started on an example mdn!
+
+---- Week IV ----
+
+
+
+
+---- Week III
 
 10/10/18
 - Fuck BUCS lol, moving my shit!!1!

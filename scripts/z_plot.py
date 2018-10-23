@@ -252,7 +252,7 @@ if __name__ == '__main__':
     random_catalogue_repeats = 1
     all_galaxy_pairs, random_galaxy_pairs = z_util.store_pairs_on_sky(redshifts['gs4_ra'][:],
                                                                       redshifts['gs4_dec'][:],
-                                                                      max_separation=15., min_separation=0.0,
+                                                                      max_separation=15., min_separation=1.5,
                                                                       max_move=26, min_move=25,
                                                                       size_of_random_catalogue=random_catalogue_repeats)
 
