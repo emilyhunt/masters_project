@@ -1,4 +1,4 @@
-"""Placeholder for a potential future class, depending on how I go about things."""
+"""Placeholder for a potential future class, depending on how I go about things."""  # todo: docstrings
 
 import tensorflow as tf
 import numpy as np
@@ -8,9 +8,21 @@ from scripts import loss_funcs
 
 class MixtureDensityNetwork:
 
-    def __init__(self, loss_function, x_features=1, y_features=1, hidden_layers=2, layer_sizes=15,
-                 mixture_components=5):
-        """Initialises an MDN in tensorflow given the specified (or default) parameters."""
+    def __init__(self, loss_function: str, x_features: int=1, y_features: int=1, hidden_layers: int=2,
+                 layer_sizes=15, mixture_components: int=5) -> None:
+        """Initialises a mixture density network in tensorflow given the specified (or default) parameters.
+
+        Args:
+            loss_function (str): name of the desired loss function
+            x_features (int): number of input x data points. Default is 1.
+            y_features (int): number of input y data points
+            hidden_layers (int): number of hidden layers
+            layer_sizes (int, list-like): sizes of all layers (int) or a list of different sizes of each layer.
+            mixture_components (int): number of mixtures to try to use
+
+        Returns:
+            None
+        """
         # Work out whether or not layer_sizes is a list of layer sizes or an integer. If it's just an integer,
         # then make it into an array of the same integer repeated.
         if isinstance(layer_sizes, int):
@@ -61,17 +73,35 @@ class MixtureDensityNetwork:
 
     # todo: everything below here
 
-    def add_new_data_source(self, x_data, y_data, name):
+    def add_new_data_source(self, x_data, y_data, name: str):
         """Modifies the class-unique feed dictionary to give to the network. Used to change the data being worked on.
         Needs to be given a name so that you can specify the data to be ran on later.
+
+        Args:
+            x_data (any): independent variables to feed to the network.
+            y_data (any): dependent variables to feed to the network.
+            name (str): name to give to this data source.
         """
-        pass
+        # Add the new x_data, y_data
+        self.dict_of_feed_dicts[str(name)] = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
-    def run(self, data_source, iterations=50):
-        """Runs a tensorflow session for the specified amount of time."""
+    def train(self, data_source: str, iterations: int=50):
+        """Trains the tensorflow graph for the specified amount of time."""
         # optimise: is there a way to record loss in-place in the loss function, instead of calling .run() twice?
+        # Let the user know about our grand plans
+
+
+
+
         pass
 
-    def plot_loss_function_evolution(start=0):
+    def plot_loss_function_evolution(self, start: int=0):
         """Returns a plot of the change of the loss function over time."""
         pass
+
+
+# Unit tests: implements the class on the toy_mdn_emily example data, using data from the following blog post:
+# http://blog.otoro.net/2015/11/24/mixture-density-networks-with-tensorflow/
+if __name__ == '__main__':
+    # todo: this unit test
+    pass
