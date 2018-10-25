@@ -3,7 +3,28 @@
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 from scripts import loss_funcs
+from sklearn.model_selection import train_test_split
+
+
+def calc_local_time(input_time):
+    """Convenience function to convert any times to prettier time strings.
+
+    Args:
+        input_time (float): the time.time() in seconds you wish to convert to a nice string.
+    """
+    return time.strftime('%c', time.localtime(input_time))
+
+
+def set_seeds(seed=42):
+    """Sets seed in numpy and tensorflow. Allows for repeatability!
+
+    Args:
+        seed (int, float): universal seed to set in tf and numpy. Default is 42.
+    """
+    np.random.seed(seed)
+    tf.set_random_seed(seed)
 
 
 class MixtureDensityNetwork:
@@ -64,44 +85,251 @@ class MixtureDensityNetwork:
         # Create a blank loss array we can append more stuff to later for recording the loss function evolution
         self.loss = np.array([])
 
-        # Initialise a blank feed dictionary dictionary (that's a mouthful... I'm so sorry)
-        self.dict_of_feed_dicts = {}
+        # Initialise blank feed dictionaries
+        self.training_data = None
+        self.validation_data = None
+
+        print('An MDN has been initialised!')
 
     def __del__(self):
         """Closes the tensorflow session."""
         self.session.close()
 
-    # todo: everything below here
-
-    def add_new_data_source(self, x_data, y_data, name: str):
-        """Modifies the class-unique feed dictionary to give to the network. Used to change the data being worked on.
-        Needs to be given a name so that you can specify the data to be ran on later.
+    def set_training_data(self, x_data, y_data):
+        """Modifies the class-unique training feed dictionary to give to the network.
 
         Args:
             x_data (any): independent variables to feed to the network.
             y_data (any): dependent variables to feed to the network.
-            name (str): name to give to this data source.
         """
         # Add the new x_data, y_data
-        self.dict_of_feed_dicts[str(name)] = {self.x_placeholder: x_data, self.y_placeholder: y_data}
+        self.training_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
-    def train(self, data_source: str, iterations: int=50):
-        """Trains the tensorflow graph for the specified amount of time."""
-        # optimise: is there a way to record loss in-place in the loss function, instead of calling .run() twice?
+    def set_validation_data(self, x_data, y_data):
+        """Modifies the class-unique validation feed dictionary to give to the network.
+
+        Args:
+            x_data (any): independent variables to feed to the network.
+            y_data (any): dependent variables to feed to the network.
+        """
+        # Add the new x_data, y_data
+        self.validation_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
+
+    def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10) -> None:
+        """Trains the tensorflow graph for the specified amount of time.
+
+        Args:
+            max_epochs (int): number of training epochs to run the network for.
+            max_runtime (int): maximum number of hours the code will run for before exiting.
+            reporting_time (float): how often, in seconds, we print to the console.
+        """
+        # optimise: a way to record loss in-place would make this a little bit faster
+        # todo: exit automatically when loss function converges.
+
+        # Get a start time and calculate the maximum amount of time we can run for.
+        start_time = time.time()
+        cutoff_time = time.time() + max_runtime * 60**2
+
         # Let the user know about our grand plans
+        print('\n=== BEGINNING TRAINING ===')
+        print('start_time   = {}'.format(calc_local_time(start_time)))
+        print('max_epochs   = {}'.format(max_epochs))
+        print('max_runtime  = {:.2f} hour'.format(max_runtime))
+        print('reporting_time = {:.1f} seconds'.format(reporting_time))
+        print('==========================')
 
+        # Correct for if training has been ran before. Note that epoch is one-indexed, so we subtract one from
+        # start_epoch to make sure calls to self.loss are all correct.
+        start_epoch = self.loss.size - 1
+        epoch = 1
 
+        # Append blank space onto the loss evolution recording array
+        self.loss = np.append(self.loss, np.empty(max_epochs))
 
+        with self.graph.as_default():
+            # Time the first step to get an estimate of how long each step will take
+            epoch_time = time.time()
+            self.session.run(self.train_function, feed_dict=self.training_data)
+            self.loss[epoch + start_epoch] = self.session.run(self.loss_function, feed_dict=self.training_data)
+            epoch_time = time.time() - epoch_time
 
-        pass
+            # Cycle over, doing some running
+            exit_reason = 'max_epochs reached'  # Cheeky string that says why we finished training
+            have_done_more_than_one_step = False  # Stop stupid predictions being made too early
+            while epoch < max_epochs:
+                step_start_time = time.time()
 
-    def plot_loss_function_evolution(self, start: int=0):
-        """Returns a plot of the change of the loss function over time."""
-        pass
+                # Work out how many epochs we can do before our next check-in
+                epochs_per_report = int(np.ceil(reporting_time / epoch_time))
+
+                # Make sure we aren't gonna go over max_epochs
+                if epoch + epochs_per_report > max_epochs:
+                    epochs_per_report = max_epochs - epoch
+
+                # Run for requisite number of epochs until refresh (this stops print from being spammed on fast code)
+                epochs_in_this_report = 0
+                while epochs_in_this_report < epochs_per_report:
+                    epoch += 1
+                    self.session.run(self.train_function, feed_dict=self.training_data)
+                    self.loss[epoch + start_epoch] = self.session.run(self.loss_function, feed_dict=self.training_data)
+                    epochs_in_this_report += 1
+
+                # Calculate the new epoch time and ETA
+                now_time = time.time()
+                finish_time = (max_epochs - epoch) * epoch_time + now_time
+
+                # Output some details on the last few epochs
+                print('--------------------------')
+                print('CURRENT TIME: {}'.format(calc_local_time(now_time)))
+                print('epoch       = {} ({:.1f}\% done)'.format(epoch, epoch / float(max_epochs) * 100))
+                print('epoch_time  = {:.3f} seconds'.format(epoch_time))
+                print('loss        = {:.5f}'.format(self.loss[epoch + start_epoch - 1]))
+
+                if have_done_more_than_one_step:
+                    print('finish_time = {}'.format(calc_local_time(finish_time)))
+
+                # Decide if we need to end
+                if now_time > cutoff_time:
+                    exit_reason = 'time limit reached'
+
+                have_done_more_than_one_step = True
+                step_end_time = time.time()
+                epoch_time = (step_end_time - step_start_time) / epochs_per_report
+
+        # It's all over! =( (we let the user know, unsurprisingly)
+        print('=== ENDING TRAINING ======')
+        print('reason      = {}'.format(exit_reason))
+        print('epochs done = {}'.format(epoch))
+        print('==========================')
+
+    def validate(self, mode: str='tensor'):
+        """Returns mixture parameters for the code given the verification data.
+
+        Args:
+            mode (str): defines the way in which data is returned.
+                options:
+                    tensor - output is in default tensorflow form.
+                    dict - output is in a dictionary of co-efficients for each object in the data set. todo: dict mode
+
+        Returns:
+            Validation data mixture co-efficients, in a format specified by the 'mode' argument.
+        """
+        print('Validating the graph on the validation data...')
+        # Run the session on validation data with the aim of returning mixture co-efficients
+        validation_mixture_weights = self.session.run(self.mixture_weights, feed_dict=self.validation_data)
+        validation_constant_one = self.session.run(self.constant_one, feed_dict=self.validation_data)
+        validation_constant_two = self.session.run(self.constant_two, feed_dict=self.validation_data)
+
+        if mode == 'tensor':
+            return {'mixture_weights': validation_mixture_weights,
+                    'constant_one': validation_constant_one,
+                    'constant_two': validation_constant_two}
+        else:
+            raise ValueError('invalid mode for return object specified.')
+
+    def plot_loss_function_evolution(self, start: int=0, end: int=-1, y_log: bool=False) -> None:
+        """Returns a plot of the change of the loss function over time.
+        Args:
+            start (int): start epoch to plot.
+            end (int): end epoch to plot. Default: -1, which sets the end to the last training step.
+            y_log (bool): if True, sets y axis to be logarithmic.
+        """
+        print('Plotting the evolution of the loss function...')
+
+        # See if the user wants the end to be the most recent loss function evaluation.
+        if end == -1:
+            end = self.loss.size
+
+        # Plot some stuff!
+        plt.figure()
+        plt.plot(np.arange(start, end), self.loss[start:end], 'r-')
+        plt.title('Loss function evolution')
+
+        # Set the plot to be log if desired, and show
+        if y_log:
+            plt.yscale('log')
+        plt.show()
 
 
 # Unit tests: implements the class on the toy_mdn_emily example data, using data from the following blog post:
 # http://blog.otoro.net/2015/11/24/mixture-density-networks-with-tensorflow/
 if __name__ == '__main__':
-    # todo: this unit test
-    pass
+    print('Commencing mdn.py unit tests!')
+
+    # Set the seed
+    set_seeds()
+
+    # Create some data to play with
+    def build_toy_dataset(dataset_size):
+        y_data = np.random.uniform(-10.5, 10.5, dataset_size)
+        r_data = np.random.normal(size=dataset_size)  # random noise
+        x_data = np.sin(0.75 * y_data) * 7.0 + y_data * 0.5 + r_data * 1.0
+        x_data = x_data.reshape((dataset_size, 1))
+        y_data = y_data.reshape((dataset_size, 1))
+        return train_test_split(x_data, y_data, random_state=42)
+
+    points = 5000
+
+    x_train, x_test, y_train, y_test = build_toy_dataset(points)
+    print("Size of features in training data: {}".format(x_train.shape))
+    print("Size of output in training data: {}".format(y_train.shape))
+    print("Size of features in test data: {}".format(x_test.shape))
+    print("Size of output in test data: {}".format(y_test.shape))
+    # plt.plot(x_train, y_train, 'or', mew=0, ms=3, alpha=0.2)
+    # plt.title('Training data')
+    # plt.show()
+
+    # Initialise the network
+    network = MixtureDensityNetwork('hello', x_features=1, y_features=1,
+                                    hidden_layers=2, layer_sizes=[25, 15],
+                                    mixture_components=15)
+
+    # Set the data
+    network.set_training_data(x_train, y_train)
+    network.set_validation_data(x_test, y_test)
+
+    # Train the network for 1000 epochs
+    network.train(max_epochs=2000)
+
+    # Plot the loss function
+    network.plot_loss_function_evolution()
+
+    # Validate the network
+    validation_results = network.validate(mode='tensor')
+
+    # Some code to plot a validation plot. Firstly, we have to generate points to pull from:
+    def generate_points(my_x_test, my_weights, my_means, my_std_deviations):
+        """Generates points randomly given a loada points. Uses uniform deviates to guess a mixture coefficient to use.
+        Then draws a point randomly from said selected distribution. We do this instead of picking the mode because
+        we're fitting a model to data with intrinsic scatter!"""
+        n_test_points = my_x_test.size
+
+        # Pick out some uniform deviates
+        mixtures_to_use = np.random.rand(n_test_points).reshape(n_test_points, 1)
+
+        # Create a cumulative sum of weights
+        my_weights_sum = np.cumsum(my_weights, axis=1)
+
+        # Find the first argument that's greater than the uniform deviate (since np.argmax stops at the first instance)
+        random_weights_indexes = np.argmax(np.greater(my_weights_sum, mixtures_to_use), axis=1)
+
+        # Grab the random means and standard deviations
+        random_means = my_means[np.arange(0, n_test_points), random_weights_indexes]
+        random_std_deviations = my_std_deviations[np.arange(0, n_test_points), random_weights_indexes]
+
+        # Use these parameters to make some random numbers that are normal distributed
+        return np.random.normal(loc=random_means, scale=random_std_deviations)
+
+    # Make some points
+    y_test_random = generate_points(x_test, validation_results['mixture_weights'], validation_results['constant_one'],
+                                    validation_results['constant_two'])
+
+    # Plot some stuff
+    plt.figure()
+    plt.plot(x_test, y_test, 'or', mew=0, ms=3, alpha=0.5, label='Training data')
+    plt.plot(x_test, y_test_random, 'ob', mew=0, ms=3, alpha=0.5, label='Predictions')
+    plt.title('Network prediction vs training data')
+    plt.legend(fancybox=True)
+    plt.ylim(-25, 25)
+    plt.show()
+
