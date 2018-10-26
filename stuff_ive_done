@@ -11,13 +11,20 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+25/10/18
+- Finished the barebones and testing of the MDN class!
+- Added some gorgeous running helping (mostly modified from BATDOG), including ETAs and reporting only every few seconds
+- This class is a total fucking babe because you can easily change parameters in the network like number of layers, size etc
+- Some basic analysis has been added, like a loss function evolution plotter. Could do with adding MAP estimation.
+- Also it only supports one lossfunc type (with no regularisation) atm and that sucks lol
+
+24/10/18
+- Started work on an MDN class to make the code a lot nicer
+
 23/10/18
 - Got an MDN example working!!! YAY (maybe)
 - I had bigtime issues with tf.subtract() broadcasting not working. I *hope* that the cheeky fix I've done works.
 - I'm not currently reproducing loss functions as low as in the Edward example, so fingers crossed it's even actually working.
-
-
-
 
 22/10/18
 - Got the blog example running on my computer
@@ -29,7 +36,7 @@ Stuff I could do:
 ---- Week IV ----
 
 
-
+- had the fucking presentation
 
 ---- Week III
 

@@ -29,12 +29,13 @@ def set_seeds(seed=42):
 
 class MixtureDensityNetwork:
 
-    def __init__(self, loss_function: str, x_features: int=1, y_features: int=1, hidden_layers: int=2,
-                 layer_sizes=15, mixture_components: int=5) -> None:
+    def __init__(self, loss_function, regularization: str='none', regularization_scale=0.1, x_features: int=1,
+                 y_features: int=1, hidden_layers: int=2, layer_sizes=15, mixture_components: int=5) -> None:
         """Initialises a mixture density network in tensorflow given the specified (or default) parameters.
 
         Args:
-            loss_function (str): name of the desired loss function
+            loss_function (loss_funcs class): an instance of the desired loss function to use.
+            regularization (str): controls the type of weight regularisation. Accepts 'none' (default), 'L1' or 'L2'.
             x_features (int): number of input x data points. Default is 1.
             y_features (int): number of input y data points
             hidden_layers (int): number of hidden layers
@@ -51,6 +52,7 @@ class MixtureDensityNetwork:
 
         # Create a tensorflow graph for this class
         self.graph = tf.Graph()
+        self.graph_output_names = loss_function.coefficient_names
 
         # Setup our graph
         with self.graph.as_default():
@@ -58,24 +60,47 @@ class MixtureDensityNetwork:
             self.x_placeholder = tf.placeholder(tf.float32, [None, x_features])
             self.y_placeholder = tf.placeholder(tf.float32, [None, y_features])
 
-            # Setup of the requisite number of layers, kept in a list
+            # Decide on the type of weight co-efficient regularisation to use based on what the user specified
+            if regularization is 'none':
+                self.regularisation_function = None
+                self.regularisation_loss = 0
+            elif regularization is 'L1':
+                self.regularisation_function = tf.contrib.layers.l1_regularizer(regularization_scale)
+                self.regularisation_loss = tf.losses.get_regularization_loss()
+            elif regularization is 'L2':
+                self.regularisation_function = tf.contrib.layers.l2_regularizer(regularization_scale)
+                self.regularisation_loss = tf.losses.get_regularization_loss()
+            else:
+                raise ValueError('specified regularisation type is invalid or unsupported.')
+
+            # Setup of the requisite number of layers, kept in a list - this lets us use easy numerical indexes
+            # (including just -1 to get to the last one) to access different hidden layers.
             i = 0
             self.graph_layers = []
-            self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i], activation=tf.nn.relu))
+
+            # Join layers to x data
+            self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i], activation=tf.nn.relu,
+                                                     kernel_regularizer=self.regularisation_function))
+
+            # Join layers to each other from here on out
             i += 1
             while i < hidden_layers:
                 self.graph_layers.append(tf.layers.dense(self.graph_layers[i - 1], layer_sizes[i],
-                                                         activation=tf.nn.relu))
+                                                         activation=tf.nn.relu,
+                                                         kernel_regularizer=self.regularisation_function))
                 i += 1
 
-            # Setup of the outputs, with support for two constants todo: need to be able to change the activation fn
-            self.mixture_weights = tf.layers.dense(self.graph_layers[-1], mixture_components, activation=tf.nn.softmax)
-            self.constant_one = tf.layers.dense(self.graph_layers[-1], mixture_components, activation=None)
-            self.constant_two = tf.layers.dense(self.graph_layers[-1], mixture_components, activation=tf.exp)
+            # Setup of the outputs as a dictionary of output layers, by cycling over the names of outputs and the
+            self.graph_output = {}
+            for output_name, activation_function in zip(loss_function.coefficient_names,
+                                                        loss_function.activation_functions):
+                self.graph_output[output_name] = tf.layers.dense(self.graph_layers[-1], mixture_components,
+                                                                 activation=activation_function,
+                                                                 kernel_regularizer=self.regularisation_function)
 
-            # Initialise the loss function and training scheme todo: only supports the default
-            self.loss_function = loss_funcs.normal_distribution_l0_reg(self.y_placeholder, self.mixture_weights,
-                                                                       self.constant_one, self.constant_two)
+            # Initialise the loss function and training scheme
+            self.loss_function = tf.add(loss_function.evaluate(self.y_placeholder, self.graph_output),
+                                        self.regularisation_loss)
             self.train_function = tf.train.AdamOptimizer().minimize(self.loss_function)
 
             # Initialise a tensorflow session object using our lovely graph we just made, and initialise the variables
@@ -181,7 +206,7 @@ class MixtureDensityNetwork:
                 # Output some details on the last few epochs
                 print('--------------------------')
                 print('CURRENT TIME: {}'.format(calc_local_time(now_time)))
-                print('epoch       = {} ({:.1f}\% done)'.format(epoch, epoch / float(max_epochs) * 100))
+                print('epoch       = {} ({:.1f}% done)'.format(epoch, epoch / float(max_epochs) * 100))
                 print('epoch_time  = {:.3f} seconds'.format(epoch_time))
                 print('loss        = {:.5f}'.format(self.loss[epoch + start_epoch - 1]))
 
@@ -202,33 +227,25 @@ class MixtureDensityNetwork:
         print('epochs done = {}'.format(epoch))
         print('==========================')
 
-    def validate(self, mode: str='tensor'):
+    def validate(self):
         """Returns mixture parameters for the code given the verification data.
 
-        Args:
-            mode (str): defines the way in which data is returned.
-                options:
-                    tensor - output is in default tensorflow form.
-                    dict - output is in a dictionary of co-efficients for each object in the data set. todo: dict mode
-
         Returns:
-            Validation data mixture co-efficients, in a format specified by the 'mode' argument.
+            Validation data mixture co-efficients in a dictionary that sorts them by name.
         """
         print('Validating the graph on the validation data...')
         # Run the session on validation data with the aim of returning mixture co-efficients
-        validation_mixture_weights = self.session.run(self.mixture_weights, feed_dict=self.validation_data)
-        validation_constant_one = self.session.run(self.constant_one, feed_dict=self.validation_data)
-        validation_constant_two = self.session.run(self.constant_two, feed_dict=self.validation_data)
+        result = {}
 
-        if mode == 'tensor':
-            return {'mixture_weights': validation_mixture_weights,
-                    'constant_one': validation_constant_one,
-                    'constant_two': validation_constant_two}
-        else:
-            raise ValueError('invalid mode for return object specified.')
+        # Cycle over the different output constants, writing their validation run to 'result'
+        for a_constant in self.graph_output_names:
+            result[a_constant] = self.session.run(self.graph_output[a_constant], feed_dict=self.validation_data)
+
+        return result
 
     def plot_loss_function_evolution(self, start: int=0, end: int=-1, y_log: bool=False) -> None:
         """Returns a plot of the change of the loss function over time.
+
         Args:
             start (int): start epoch to plot.
             end (int): end epoch to plot. Default: -1, which sets the end to the last training step.
@@ -249,6 +266,14 @@ class MixtureDensityNetwork:
         if y_log:
             plt.yscale('log')
         plt.show()
+
+    def calculate_map(self):  # todo
+        """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions"""
+        pass
+
+    def calculate_5050(self):  # todo
+        """Calculates the central mean of a given set of mixture distributions"""
+        pass
 
 
 # Unit tests: implements the class on the toy_mdn_emily example data, using data from the following blog post:
@@ -280,22 +305,22 @@ if __name__ == '__main__':
     # plt.show()
 
     # Initialise the network
-    network = MixtureDensityNetwork('hello', x_features=1, y_features=1,
-                                    hidden_layers=2, layer_sizes=[25, 15],
+    network = MixtureDensityNetwork(loss_funcs.NormalDistribution(), regularization='L2',
+                                    x_features=1, y_features=1, hidden_layers=2, layer_sizes=[25, 15],
                                     mixture_components=15)
 
     # Set the data
     network.set_training_data(x_train, y_train)
     network.set_validation_data(x_test, y_test)
 
-    # Train the network for 1000 epochs
-    network.train(max_epochs=2000)
+    # Train the network for max_epochs epochs
+    network.train(max_epochs=3000)
 
     # Plot the loss function
     network.plot_loss_function_evolution()
 
     # Validate the network
-    validation_results = network.validate(mode='tensor')
+    validation_results = network.validate()
 
     # Some code to plot a validation plot. Firstly, we have to generate points to pull from:
     def generate_points(my_x_test, my_weights, my_means, my_std_deviations):
@@ -321,8 +346,10 @@ if __name__ == '__main__':
         return np.random.normal(loc=random_means, scale=random_std_deviations)
 
     # Make some points
-    y_test_random = generate_points(x_test, validation_results['mixture_weights'], validation_results['constant_one'],
-                                    validation_results['constant_two'])
+    y_test_random = generate_points(x_test,
+                                    validation_results[network.graph_output_names[0]],
+                                    validation_results[network.graph_output_names[1]],
+                                    validation_results[network.graph_output_names[2]])
 
     # Plot some stuff
     plt.figure()

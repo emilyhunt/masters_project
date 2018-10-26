@@ -43,7 +43,7 @@ y_placeholder = tf.placeholder(tf.float32, [None, features])
 # Setup our layers
 hidden_layer_1 = tf.layers.dense(x_placeholder, layer_size, activation=tf.nn.relu)
 hidden_layer_2 = tf.layers.dense(hidden_layer_1, layer_size, activation=tf.nn.relu)
-means = tf.layers.dense(hidden_layer_2, mixture_components, activation=None)  # todo: I changed this
+means = tf.layers.dense(hidden_layer_2, mixture_components, activation=None)
 std_deviations = tf.layers.dense(hidden_layer_2, mixture_components, activation=tf.exp)
 mixture_weights = tf.layers.dense(hidden_layer_2, mixture_components, activation=tf.nn.softmax)
 
@@ -66,8 +66,6 @@ def get_loss_func(a_point, my_weights, my_means, my_std_deviations):
     result = tf.multiply(result, my_weights)
 
     # Sum the result and take the mean negative log
-    # todo: mean log is sensitive to outliers
-    # todo: add some kind of L2 regularisation, penalising poor weight choices
     result = tf.reduce_sum(result, 1, keepdims=True)
     result = -tf.log(result)
     return tf.reduce_mean(result)
