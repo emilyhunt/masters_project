@@ -4,12 +4,17 @@ Questions:
 
 
 Stuff I could do:
-> Make my own mixture density network api, consisting of a class that during initialisation makes an mdn to requisite specs
-  - this would make the code a shit ton more readable
-  - it would make it really easy to launch multiple graphs but comparing settings between them
-  - I need to change to using the 'with my_graph.as_default():' notation to help with this
+> Look at the stack exchange Shoham linked to me and write down the optimum number of layers to use etc
+> Add MAP and 50/50 value estimation to MixtureDensityNetwork and also add some plotting tools to show distributions at a specific data point (will be very useful for redshifts)
 
 ---- ---- ---- ---- ----
+
+26/10/18
+- Changed loss functions to now use a class system (lol)
+- Added regularisation to MixtureDensityNetwork
+- MixtureDensityNetwork.validate() now returns output in a dictionary, with keys that are loss-function specific
+- Regularisation improves the code on the test example
+- The MDN code I have is now very ready for action, yay!
 
 25/10/18
 - Finished the barebones and testing of the MDN class!

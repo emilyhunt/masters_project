@@ -3,7 +3,7 @@
 Note that as currently implemented, loss functions should:
     - Be a class, with a list self.activation_functions of different activation functions that should be used with
       each different mixture co-efficient
-    - Have an 'evaluate' argument that a MixtureDensityNetwork class can use, with:
+    - Have an 'tensor_evaluate' argument that a MixtureDensityNetwork class can use, with:
         ~ an argument that is 'a point' aka the y/dependent variable data
         ~ the second argument should be a dictionary containing all of the required co-efficients
 
@@ -11,6 +11,7 @@ Note that as currently implemented, loss functions should:
 
 import tensorflow as tf
 import numpy as np
+from scipy.stats import norm as scipy_normal
 
 
 class NormalDistribution:
@@ -35,7 +36,7 @@ class NormalDistribution:
         result = -tf.square(result) / 2
         return tf.multiply(tf.exp(result), tf.reciprocal(my_std_deviations)) * self.one_div_sqrt_two_pi
 
-    def evaluate(self, a_point, coefficients):
+    def tensor_evaluate(self, a_point, coefficients):
         """Lossfunc defined in tensorflow notation.
 
         Args:
@@ -43,7 +44,7 @@ class NormalDistribution:
             coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument.
 
         Returns:
-            a float giving the mean
+            a float giving the loss
         """
         # Calculate normal distribution mixture and normalise
         result = self.tensor_normal_distribution(a_point, coefficients['means'], coefficients['std_deviations'])
@@ -54,6 +55,24 @@ class NormalDistribution:
         result = tf.reduce_sum(result, 1, keepdims=True)
         result = -tf.log(result)
         return tf.reduce_mean(result)
+
+    @staticmethod
+    def pdf(x_data, coefficients, dict_mode=True):
+        """Lossfunc defined in simple numpy arrays. Will instead return a galaxy-wise pdf.
+
+        Args:
+            x_data: the y/dependent variable data to evaluate against.
+            coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument, of shape
+                          (N_galaxies, N_mixtures.)
+
+        Returns:
+            the pdf value at whatever point(s) you've evaluated it at. Will have one fewer dimensions than the input
+            data. (So: put in pdfs for a load of galaxies and it'll evaluate all of them individually and return an
+            array of pdf values summed across each galaxy. OR, put in a single galaxy and you'll only get a scalar back,
+            because there's only one galaxy to sum the mixture probability distribution of.)
+        """
+        return np.sum(scipy_normal.pdf(x_data, loc=coefficients['means'], scale=coefficients['std_deviations'])
+                      * coefficients['weights'], axis=coefficients['means'].ndim - 1)
 
 
 class BetaDistribution:
@@ -92,15 +111,15 @@ class BetaDistribution:
         f4 = self.tensor_log_gamma(alpha + beta)
         return tf.exp(tf.add((tf.subtract(f4, tf.add(f2, f3))), f1))
 
-    def evaluate(self, a_point, coefficients):
+    def tensor_evaluate(self, a_point, coefficients):
         """Lossfunc defined in tensorflow notation.
 
         Args:
-            a_point: the y/dependent variable data to evaluate against.
+            a_point: the y/dependent variable data to tensor_evaluate against.
             coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument.
 
         Returns:
-            a float giving the mean
+            a float giving the loss
         """
         # Calculate normal distribution mixture and normalise
         result = self.tensor_beta_distribution(a_point, coefficients['alpha'], coefficients['beta'])
@@ -110,3 +129,5 @@ class BetaDistribution:
         result = tf.reduce_sum(result, 1, keepdims=True)
         result = -tf.log(result)
         return tf.reduce_mean(result)
+
+    # todo: standard evaluation method

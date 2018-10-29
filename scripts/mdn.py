@@ -6,15 +6,7 @@ import matplotlib.pyplot as plt
 import time
 from scripts import loss_funcs
 from sklearn.model_selection import train_test_split
-
-
-def calc_local_time(input_time):
-    """Convenience function to convert any times to prettier time strings.
-
-    Args:
-        input_time (float): the time.time() in seconds you wish to convert to a nice string.
-    """
-    return time.strftime('%c', time.localtime(input_time))
+from scipy.optimize import minimize as scipy_minimize
 
 
 def set_seeds(seed=42):
@@ -25,6 +17,15 @@ def set_seeds(seed=42):
     """
     np.random.seed(seed)
     tf.set_random_seed(seed)
+
+
+def calc_local_time(input_time):
+    """Convenience function to convert any times to prettier time strings.
+
+    Args:
+        input_time (float): the time.time() in seconds you wish to convert to a nice string.
+    """
+    return time.strftime('%c', time.localtime(input_time))
 
 
 class MixtureDensityNetwork:
@@ -98,10 +99,12 @@ class MixtureDensityNetwork:
                                                                  activation=activation_function,
                                                                  kernel_regularizer=self.regularisation_function)
 
-            # Initialise the loss function and training scheme
-            self.loss_function = tf.add(loss_function.evaluate(self.y_placeholder, self.graph_output),
-                                        self.regularisation_loss)
-            self.train_function = tf.train.AdamOptimizer().minimize(self.loss_function)
+            # Initialise the loss function (storing the user-specified one with the class) and training scheme
+            self.loss_function = loss_function
+            self.loss_function_tensor = tf.add(self.loss_function.tensor_evaluate(self.y_placeholder,
+                                                                                  self.graph_output),
+                                               self.regularisation_loss)
+            self.train_function = tf.train.AdamOptimizer().minimize(self.loss_function_tensor)
 
             # Initialise a tensorflow session object using our lovely graph we just made, and initialise the variables
             self.session = tf.Session()
@@ -175,7 +178,7 @@ class MixtureDensityNetwork:
             # Time the first step to get an estimate of how long each step will take
             epoch_time = time.time()
             self.session.run(self.train_function, feed_dict=self.training_data)
-            self.loss[epoch + start_epoch] = self.session.run(self.loss_function, feed_dict=self.training_data)
+            self.loss[epoch + start_epoch] = self.session.run(self.loss_function_tensor, feed_dict=self.training_data)
             epoch_time = time.time() - epoch_time
 
             # Cycle over, doing some running
@@ -196,7 +199,7 @@ class MixtureDensityNetwork:
                 while epochs_in_this_report < epochs_per_report:
                     epoch += 1
                     self.session.run(self.train_function, feed_dict=self.training_data)
-                    self.loss[epoch + start_epoch] = self.session.run(self.loss_function, feed_dict=self.training_data)
+                    self.loss[epoch + start_epoch] = self.session.run(self.loss_function_tensor, feed_dict=self.training_data)
                     epochs_in_this_report += 1
 
                 # Calculate the new epoch time and ETA
@@ -267,8 +270,45 @@ class MixtureDensityNetwork:
             plt.yscale('log')
         plt.show()
 
-    def calculate_map(self):  # todo
-        """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions"""
+    def calculate_map(self, validation_data):  # todo
+        """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions."""
+        print('Attempting to calculate the MAP values of all distributions...')
+
+        # Define a function to minimise, multiplied by -1 to make sure we're minimising not maximising
+        def function_to_minimise(x_data, my_object_dictionary, my_loss_function):
+            return -1 * my_loss_function.pdf(x_data, my_object_dictionary)
+
+        # Create a blank array of np.nan values to populate with hopefully successful minimisations
+        n_objects = validation_data[self.graph_output_names[0]].size
+        map_values = np.empty(n_objects)
+
+        # Loop over each object and work out the MAP values for each
+        i = 0
+        while i < n_objects:
+
+            # Make a dictionary that only has data on this specific galaxy
+            object_dictionary = {}
+            for a_name in self.graph_output_names:
+                object_dictionary[a_name] = validation_data[a_name][i]
+
+            # Make a sensible starting guess
+            starting_guess = 0.5
+
+            # Attempt to minimise and find the MAP value
+            result = scipy_minimize(function_to_minimise, np.array([starting_guess]),
+                                    args=(object_dictionary, self.loss_function), method='Nelder-Mead',
+                                    options={'disp': False})
+
+            if result.success:
+                map_values[i] = result.x
+
+
+
+
+
+
+
+
         pass
 
     def calculate_5050(self):  # todo
