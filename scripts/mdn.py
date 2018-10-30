@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import sys
 from scripts import loss_funcs
 from sklearn.model_selection import train_test_split
 from scipy.optimize import minimize as scipy_minimize
@@ -230,6 +231,30 @@ class MixtureDensityNetwork:
         print('epochs done = {}'.format(epoch))
         print('==========================')
 
+    def save_graph(self, location: str):
+        """Saves a complete copy of the current network to a specified location.
+        Args:
+            location (str): place where you want it saved, including the filename.
+        Returns:
+            None
+        """
+        # Make a tf.train.Saver object and use it to save the graph.
+        with self.graph.as_default():
+            saver = tf.train.Saver()
+            save_path = saver.save(self.session, location)
+
+        print("A copy of the model has been saved to {}".format(save_path))
+
+    def open_graph(self, location: str):
+        """Saves a complete copy of the current network to a specified location.
+        Args:
+            location (str): place where you want it saved, including the filename.
+        Returns:
+            None
+        """
+        # todo: make this work, as it requires doing some extra stuff with loss functions and writing shit to the class
+        pass
+
     def validate(self):
         """Returns mixture parameters for the code given the verification data.
 
@@ -270,7 +295,7 @@ class MixtureDensityNetwork:
             plt.yscale('log')
         plt.show()
 
-    def calculate_map(self, validation_data):  # todo
+    def calculate_map(self, validation_data, reporting_interval: int=100):  # todo
         """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions."""
         print('Attempting to calculate the MAP values of all distributions...')
 
@@ -279,11 +304,13 @@ class MixtureDensityNetwork:
             return -1 * my_loss_function.pdf(x_data, my_object_dictionary)
 
         # Create a blank array of np.nan values to populate with hopefully successful minimisations
-        n_objects = validation_data[self.graph_output_names[0]].size
+        n_objects = validation_data[self.graph_output_names[0]].shape[0]
         map_values = np.empty(n_objects)
 
         # Loop over each object and work out the MAP values for each
         i = 0
+        successes = 0
+        mean_number_of_iterations = 0.0
         while i < n_objects:
 
             # Make a dictionary that only has data on this specific galaxy
@@ -299,17 +326,27 @@ class MixtureDensityNetwork:
                                     args=(object_dictionary, self.loss_function), method='Nelder-Mead',
                                     options={'disp': False})
 
+            # Store the result only if we're able to
             if result.success:
                 map_values[i] = result.x
+                successes += 1
+                mean_number_of_iterations += result.nit
+            else:
+                print('Failed to find MAP for object {}!'.format(i))
+                map_values[i] = np.nan
 
+            # Keep the user updated on what interval of objects we're working on (prevents panic if this takes ages)
+            if i % reporting_interval == 0:
+                print('Working on objects {} to {}...'.format(i, i+reporting_interval))
 
+            i += 1
 
+        # Calculate the mean number of iterations of the minimizer
+        mean_number_of_iterations /= float(successes)
 
-
-
-
-
-        pass
+        print('Found MAP values for {:.2f}% of objects.'.format(100 * successes / float(n_objects)))
+        print('Mean number of iterations = {}'.format(mean_number_of_iterations))
+        return map_values
 
     def calculate_5050(self):  # todo
         """Calculates the central mean of a given set of mixture distributions"""
@@ -354,7 +391,7 @@ if __name__ == '__main__':
     network.set_validation_data(x_test, y_test)
 
     # Train the network for max_epochs epochs
-    network.train(max_epochs=3000)
+    network.train(max_epochs=10)
 
     # Plot the loss function
     network.plot_loss_function_evolution()

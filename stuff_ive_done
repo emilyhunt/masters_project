@@ -6,8 +6,17 @@ Questions:
 Stuff I could do:
 > Look at the stack exchange Shoham linked to me and write down the optimum number of layers to use etc
 > Add MAP and 50/50 value estimation to MixtureDensityNetwork and also add some plotting tools to show distributions at a specific data point (will be very useful for redshifts)
+> Add priors to the loss functions
+> Deal with interstellar extinction better, somehow
 
 ---- ---- ---- ---- ----
+
+29/10/18
+- Began work on a MAP value calculator.
+- Getting very tempted to add priors
+
+---- Week V ----
+
 
 26/10/18
 - Changed loss functions to now use a class system (lol)
