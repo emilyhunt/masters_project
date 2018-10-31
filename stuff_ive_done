@@ -4,12 +4,24 @@ Questions:
 
 
 Stuff I could do:
-> Look at the stack exchange Shoham linked to me and write down the optimum number of layers to use etc
-> Add MAP and 50/50 value estimation to MixtureDensityNetwork and also add some plotting tools to show distributions at a specific data point (will be very useful for redshifts)
+> Save a copy of the graph of the network on exit and save the validation data results to the class/elsewhere
+> Add MAP value estimation to MixtureDensityNetwork and also add some plotting tools to show distributions at a specific data point (will be very useful for redshifts)
 > Add priors to the loss functions
 > Deal with interstellar extinction better, somehow
+> Implement TensorBoard support
 
 ---- ---- ---- ---- ----
+
+31/10/18
+- Running successfully on blog example stuff (yay!)
+- Now using a couple of data scaling systems from sklearn, which are implemented in MixtureDensityNetwork (this needs better testing, and a way to spec scaling options on the minmax scaler)
+- Looked into how to use TensorBoard. It looks like it'd be really awesome to add for diagnostics!
+
+30/10/18
+- MAP value calculator is made
+- Looked at some ways of working out good hidden layer sizes
+- Got a bit stressed about life =(
+- Couldn't see how to add HDI and ETI error bound estimation without a total faff. Needs more faffing with to un-faff the situation.
 
 29/10/18
 - Began work on a MAP value calculator.

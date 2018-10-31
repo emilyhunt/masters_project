@@ -6,8 +6,11 @@ import matplotlib.pyplot as plt
 import time
 import sys
 from scripts import loss_funcs
+from typing import Optional
 from sklearn.model_selection import train_test_split
 from scipy.optimize import minimize as scipy_minimize
+from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import MinMaxScaler
 
 
 def set_seeds(seed=42):
@@ -31,8 +34,9 @@ def calc_local_time(input_time):
 
 class MixtureDensityNetwork:
 
-    def __init__(self, loss_function, regularization: str='none', regularization_scale=0.1, x_features: int=1,
-                 y_features: int=1, hidden_layers: int=2, layer_sizes=15, mixture_components: int=5) -> None:
+    def __init__(self, loss_function, regularization: Optional[str]=None, regularization_scale=0.1,
+                 x_features: int=1, y_features: int=1, x_scaling: Optional[str]=None, y_scaling: Optional[str]=None,
+                 hidden_layers: int=2, layer_sizes=15, mixture_components: int=5,) -> None:
         """Initialises a mixture density network in tensorflow given the specified (or default) parameters.
 
         Args:
@@ -63,7 +67,7 @@ class MixtureDensityNetwork:
             self.y_placeholder = tf.placeholder(tf.float32, [None, y_features])
 
             # Decide on the type of weight co-efficient regularisation to use based on what the user specified
-            if regularization is 'none':
+            if regularization is None:
                 self.regularisation_function = None
                 self.regularisation_loss = 0
             elif regularization is 'L1':
@@ -118,6 +122,25 @@ class MixtureDensityNetwork:
         self.training_data = None
         self.validation_data = None
 
+        # Initialise scalers for the x and y data. We keep these with the class because it means that
+        if x_scaling is 'min_max':
+            self.x_scaler = RobustScaler()
+        elif x_scaling is 'robust':
+            self.x_scaler = MinMaxScaler()
+        elif x_scaling is None:
+            self.x_scaler = None
+        else:
+            raise NotImplementedError('selected x scaling type has not been implemented!')
+
+        if y_scaling is 'min_max':
+            self.y_scaler = RobustScaler()
+        elif y_scaling is 'robust':
+            self.y_scaler = MinMaxScaler(feature_range=(0.0001, 0.9999))
+        elif y_scaling is None:
+            self.y_scaler = None
+        else:
+            raise NotImplementedError('selected y scaling type has not been implemented!')
+
         print('An MDN has been initialised!')
 
     def __del__(self):
@@ -131,6 +154,14 @@ class MixtureDensityNetwork:
             x_data (any): independent variables to feed to the network.
             y_data (any): dependent variables to feed to the network.
         """
+        # Scale the x data if requested
+        if self.x_scaler is not None:
+            x_data = self.x_scaler.fit_transform(x_data)
+
+        # Scale the y data if requested
+        if self.y_scaler is not None:
+            y_data = self.y_scaler.fit_transform(y_data)
+
         # Add the new x_data, y_data
         self.training_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
@@ -141,6 +172,14 @@ class MixtureDensityNetwork:
             x_data (any): independent variables to feed to the network.
             y_data (any): dependent variables to feed to the network.
         """
+        # Scale the x data if requested, using the same scaling parameters as the training data
+        if self.x_scaler is not None:
+            x_data = self.x_scaler.transform(x_data)
+
+        # Scale the y data if requested, using the same scaling parameters as the training data
+        if self.y_scaler is not None:
+            y_data = self.y_scaler.transform(y_data)
+
         # Add the new x_data, y_data
         self.validation_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
@@ -391,7 +430,7 @@ if __name__ == '__main__':
     network.set_validation_data(x_test, y_test)
 
     # Train the network for max_epochs epochs
-    network.train(max_epochs=10)
+    network.train(max_epochs=3000)
 
     # Plot the loss function
     network.plot_loss_function_evolution()

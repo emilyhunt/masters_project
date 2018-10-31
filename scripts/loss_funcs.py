@@ -12,6 +12,7 @@ Note that as currently implemented, loss functions should:
 import tensorflow as tf
 import numpy as np
 from scipy.stats import norm as scipy_normal
+from scipy.stats import beta as scipy_beta
 
 
 class NormalDistribution:
@@ -57,22 +58,28 @@ class NormalDistribution:
         return tf.reduce_mean(result)
 
     @staticmethod
-    def pdf(x_data, coefficients, dict_mode=True):
-        """Lossfunc defined in simple numpy arrays. Will instead return a galaxy-wise pdf.
+    def pdf(x_data, coefficients: dict):
+        """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object.
 
         Args:
             x_data: the y/dependent variable data to evaluate against.
-            coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument, of shape
-                          (N_galaxies, N_mixtures.)
+            coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument, each pointing to 1D
+                          arrays of those values for the given object.
 
         Returns:
-            the pdf value at whatever point(s) you've evaluated it at. Will have one fewer dimensions than the input
-            data. (So: put in pdfs for a load of galaxies and it'll evaluate all of them individually and return an
-            array of pdf values summed across each galaxy. OR, put in a single galaxy and you'll only get a scalar back,
-            because there's only one galaxy to sum the mixture probability distribution of.)
+            A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
         """
-        return np.sum(scipy_normal.pdf(x_data, loc=coefficients['means'], scale=coefficients['std_deviations'])
-                      * coefficients['weights'], axis=coefficients['means'].ndim - 1)
+        # Cast x_data as being a 1D array that
+        x_data = np.array(x_data).flatten()
+        result = np.empty(x_data.size)
+
+        # Unfortunately we have to use a for loop as the broadcasting for scipy functions won't easily let us use lots
+        # of different points.
+        for i, a_point in enumerate(x_data):
+            result[i] = np.sum(scipy_normal.pdf(x_data, loc=coefficients['means'], scale=coefficients['std_deviations'])
+                               * coefficients['weights'], axis=coefficients['weights'].ndim - 1)
+
+        return result
 
 
 class BetaDistribution:
@@ -129,5 +136,28 @@ class BetaDistribution:
         result = tf.reduce_sum(result, 1, keepdims=True)
         result = -tf.log(result)
         return tf.reduce_mean(result)
+
+    def pdf(self, x_data, coefficients: dict):
+        """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object.
+
+                Args:
+                    x_data: the y/dependent variable data to evaluate against.
+                    coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                                  of those values for the given object.
+
+                Returns:
+                    A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
+                """
+        # Cast x_data as being a 1D array that
+        x_data = np.array(x_data).flatten()
+        result = np.empty(x_data.size)
+
+        # Unfortunately we have to use a for loop as the broadcasting for scipy functions won't easily let us use lots
+        # of different points.
+        for i, a_point in enumerate(x_data):
+            result[i] = np.sum(scipy_beta.pdf(x_data, coefficients['alpha'], coefficients['beta'])
+                               * coefficients['weights'], axis=coefficients['weights'].ndim - 1)
+
+        return result
 
     # todo: standard evaluation method
