@@ -8,15 +8,16 @@ from matplotlib import rc
 from scripts import z_util
 
 # Make TeX labels work on plots
-rc('font', **{'family': 'serif', 'serif': ['Palatino']})
-rc('text', usetex=True)
+#rc('font', **{'family': 'serif', 'serif': ['Palatino']})
+#rc('text', usetex=True)
 
 
-def phot_vs_spec(spectroscopic_z, photometric_z, fig_name='phot_vs_spec.png', nmad=None):
+def phot_vs_spec(spectroscopic_z, photometric_z, save_name='phot_vs_spec.png', nmad=None,
+                 point_alpha=0.2, point_color='r', plt_title=None, limits=None):
     """Plots photometric redshift against spectroscopic for analysis."""
     # Plot data points and a y=x bisector
     plt.figure()
-    plt.plot(spectroscopic_z, photometric_z, 'r.', ms=2, alpha=0.2)
+    plt.plot(spectroscopic_z, photometric_z, '.', color=point_color, ms=2, alpha=point_alpha)
     plt.plot([-1, 10], [-1, 10], 'k--', lw=1)
 
     # Add the NMAD to the plot if it has been specified by the user
@@ -25,13 +26,15 @@ def phot_vs_spec(spectroscopic_z, photometric_z, fig_name='phot_vs_spec.png', nm
                  bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
 
     # Make it pwetty
-    plt.xlim([-0.5, 7])
-    plt.ylim([-0.5, 7])
+    if limits is not None:
+        plt.xlim([limits[0], limits[1]])
+        plt.ylim([limits[0], limits[1]])
     plt.xlabel(r'$z_{spec}$')
     plt.ylabel(r'$z_{phot}$')
 
     # Output time
-    plt.savefig(fig_name)
+    plt.savefig(save_name)
+    plt.title(plt_title)
     plt.show()
     return 0
 

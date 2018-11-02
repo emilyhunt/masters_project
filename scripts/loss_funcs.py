@@ -13,6 +13,7 @@ import tensorflow as tf
 import numpy as np
 from scipy.stats import norm as scipy_normal
 from scipy.stats import beta as scipy_beta
+from typing import Union
 
 
 class NormalDistribution:
@@ -24,17 +25,23 @@ class NormalDistribution:
                                          applied to layers.
             - self.coefficient_names: a list of the names of each mixture coefficient.
         """
-        self.activation_functions = [tf.nn.softmax, None, tf.exp]
+        # Names of and activation functions to apply to each output layer.
         self.coefficient_names = ['weights', 'means', 'std_deviations']
+        self.activation_functions = [tf.nn.softmax, None, tf.exp]
+
+        # Variable initializers for the weights (kernel) and biases of each output layer. Try to set them sensibly.
+        self.kernel_initializers = [tf.initializers.random_normal, tf.initializers.random_normal,
+                                    tf.initializers.ones]
+        self.bias_initializers = [tf.initializers.ones, tf.initializers.ones, tf.initializers.ones]
 
         # A useful constant to keep around
-        self.one_div_sqrt_two_pi = 1 / np.sqrt(2 * np.pi)
+        self.one_div_sqrt_two_pi = np.float64(1 / np.sqrt(2 * np.pi))
 
     def tensor_normal_distribution(self, a_point, my_means, my_std_deviations):
         """A normal distribution implemented in tensorflow notation."""
         result = tf.subtract(a_point, my_means)
         result = tf.multiply(result, tf.reciprocal(my_std_deviations))
-        result = -tf.square(result) / 2
+        result = -tf.square(result) / np.float64(2)
         return tf.multiply(tf.exp(result), tf.reciprocal(my_std_deviations)) * self.one_div_sqrt_two_pi
 
     def tensor_evaluate(self, a_point, coefficients):
@@ -58,28 +65,49 @@ class NormalDistribution:
         return tf.reduce_mean(result)
 
     @staticmethod
-    def pdf(x_data, coefficients: dict):
-        """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object.
+    def pdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
+        """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object. Fastest at
+        evaluating lots of x data points: for instance, for initial minimum finding or for plotting a pdf.
 
+                Args:
+                    x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
+                    coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                                  of those values for the given object.
+                    sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
+                                  a big array of all the mixture components individually.
+
+                Returns:
+                    A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
+        """
+        # Typecast x_data as a 1D numpy array and work out how many mixtures there are
+        x_data = np.array([x_data]).flatten()
+        n_mixtures = coefficients['weights'].size
+        all_the_pdfs = np.empty((n_mixtures, x_data.size))
+
+        # Cycle over each mixture and evaluate the pdf
+        for i, a_weight, a_mean, a_std_d in zip(enumerate(coefficients['weights']), coefficients['means'],
+                                                      coefficients['std_deviations']):
+            all_the_pdfs[i, :] = scipy_normal.pdf(x_data, loc=a_mean, scale=a_std_d) * a_weight
+
+        # Sum if requested
+        if sum_mixtures:
+            return np.sum(all_the_pdfs, axis=0)
+        else:
+            return all_the_pdfs
+
+    @staticmethod
+    def pdf_single_point(x_point: Union[float, int], coefficients: dict):
+        """Lossfunc implemented in a much faster way for single point evaluations.
         Args:
-            x_data: the y/dependent variable data to evaluate against.
-            coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument, each pointing to 1D
-                          arrays of those values for the given object.
+            x_point: the y/dependent variable data to evaluate against. Can only be a float or int.
+            coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                          of those values for the given object.
 
         Returns:
-            A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
+            A float of the pdf evaluated at a single point.
         """
-        # Cast x_data as being a 1D array that
-        x_data = np.array(x_data).flatten()
-        result = np.empty(x_data.size)
-
-        # Unfortunately we have to use a for loop as the broadcasting for scipy functions won't easily let us use lots
-        # of different points.
-        for i, a_point in enumerate(x_data):
-            result[i] = np.sum(scipy_normal.pdf(x_data, loc=coefficients['means'], scale=coefficients['std_deviations'])
-                               * coefficients['weights'], axis=coefficients['weights'].ndim - 1)
-
-        return result
+        return np.sum(scipy_normal.pdf(x_point, loc=coefficients['means'], scale=coefficients['std_deviations'])
+                      * coefficients['weights'])
 
 
 class BetaDistribution:
@@ -91,27 +119,30 @@ class BetaDistribution:
                                          applied to layers.
             - self.coefficient_names: a list of the names of each mixture coefficient.
         """
-        self.activation_functions = [tf.nn.softmax, tf.exp, tf.exp]
+        # Names of and activation functions to apply to each output layer.
         self.coefficient_names = ['weights', 'alpha', 'beta']
+        self.activation_functions = [tf.nn.softmax, tf.exp, tf.exp]
 
-        # A useful constant to keep around
-        self.one_div_sqrt_two_pi = 1 / np.sqrt(2 * np.pi)
+        # Variable initializers for the weights (kernel) and biases of each output layer. Try to set them sensibly.
+        self.kernel_initializers = [tf.initializers.random_normal, tf.initializers.random_uniform,
+                                    tf.initializers.random_uniform]
+        self.bias_initializers = [tf.initializers.ones, tf.initializers.zeros, tf.initializers.zeros]
 
     @staticmethod
     def tensor_log_gamma(x):
         """A fast approximate log gamma function from Paul Mineiro. See:
         http://www.machinedlearnings.com/2011/06/faster-lda.html
         """
-        log_term = tf.log(x * (1.0 + x) * (2.0 + x))
-        x_plus_3 = 3.0 + x
-        return -2.081061466 - x + 0.0833333 / x_plus_3 - log_term + (2.5 + x) * tf.log(x_plus_3)
+        log_term = tf.log(x * (np.float64(1.0) + x) * (np.float64(2.0) + x))
+        x_plus_3 = np.float64(3.0) + x
+        return np.float64(-2.081061466) - x + np.float64(0.0833333) / x_plus_3 - log_term + (np.float64(2.5) + x) * tf.log(x_plus_3)
 
     def tensor_beta_distribution(self, a_point, alpha, beta):
         """An APPROXIMATE (& fast) beta distribution implemented in tensorflow notation."""
-        exp1 = tf.subtract(alpha, 1.0)
-        exp2 = tf.subtract(beta, 1.0)
+        exp1 = tf.subtract(alpha, np.float64(1.0))
+        exp2 = tf.subtract(beta, np.float64(1.0))
         d1 = tf.multiply(exp1, tf.log(a_point))
-        d2 = tf.multiply(exp2, tf.log(tf.subtract(1.0, a_point)))
+        d2 = tf.multiply(exp2, tf.log(tf.subtract(np.float64(1.0), a_point)))
         f1 = tf.add(d1, d2)
         f2 = self.tensor_log_gamma(alpha)
         f3 = self.tensor_log_gamma(beta)
@@ -137,27 +168,46 @@ class BetaDistribution:
         result = -tf.log(result)
         return tf.reduce_mean(result)
 
-    def pdf(self, x_data, coefficients: dict):
-        """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object.
+    @staticmethod
+    def pdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
+        """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object. Fastest at
+        evaluating lots of x data points: for instance, for initial minimum finding or for plotting a pdf.
 
                 Args:
-                    x_data: the y/dependent variable data to evaluate against.
+                    x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
                     coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
                                   of those values for the given object.
+                    sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
+                                  a big array of all the mixture components individually.
 
                 Returns:
                     A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
-                """
-        # Cast x_data as being a 1D array that
-        x_data = np.array(x_data).flatten()
-        result = np.empty(x_data.size)
+        """
+        # Typecast x_data as a 1D numpy array and work out how many mixtures there are
+        x_data = np.array([x_data]).flatten()
+        n_mixtures = coefficients['weights'].size
+        all_the_pdfs = np.empty((n_mixtures, x_data.size))
 
-        # Unfortunately we have to use a for loop as the broadcasting for scipy functions won't easily let us use lots
-        # of different points.
-        for i, a_point in enumerate(x_data):
-            result[i] = np.sum(scipy_beta.pdf(x_data, coefficients['alpha'], coefficients['beta'])
-                               * coefficients['weights'], axis=coefficients['weights'].ndim - 1)
+        # Cycle over each mixture and evaluate the pdf
+        for i, a_weight, a_alpha, a_beta in enumerate(zip(coefficients['weights'], coefficients['alpha'],
+                                                      coefficients['beta'])):
+            all_the_pdfs[i, :] = scipy_beta.pdf(x_data, a_alpha, a_beta) * a_weight
 
-        return result
+        # Sum if requested
+        if sum_mixtures:
+            return np.sum(all_the_pdfs, axis=0)
+        else:
+            return all_the_pdfs
 
-    # todo: standard evaluation method
+    @staticmethod
+    def pdf_single_point(x_point: Union[float, int], coefficients: dict):
+        """Lossfunc implemented in a much faster way for single point evaluations.
+        Args:
+            x_point: the y/dependent variable data to evaluate against. Can only be a float or int.
+            coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                          of those values for the given object.
+
+        Returns:
+            A float of the pdf evaluated at a single point.
+        """
+        return np.sum(scipy_beta.pdf(x_point, coefficients['alpha'], coefficients['beta']) * coefficients['weights'])

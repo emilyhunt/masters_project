@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import sys
+from matplotlib import cm
 from scripts import loss_funcs
 from typing import Optional
 from sklearn.model_selection import train_test_split
@@ -36,7 +37,7 @@ class MixtureDensityNetwork:
 
     def __init__(self, loss_function, regularization: Optional[str]=None, regularization_scale=0.1,
                  x_features: int=1, y_features: int=1, x_scaling: Optional[str]=None, y_scaling: Optional[str]=None,
-                 hidden_layers: int=2, layer_sizes=15, mixture_components: int=5,) -> None:
+                 hidden_layers: int=2, layer_sizes=15, mixture_components: int=5, learning_rate=0.001) -> None:
         """Initialises a mixture density network in tensorflow given the specified (or default) parameters.
 
         Args:
@@ -63,13 +64,13 @@ class MixtureDensityNetwork:
         # Setup our graph
         with self.graph.as_default():
             # Placeholders for input data
-            self.x_placeholder = tf.placeholder(tf.float32, [None, x_features])
-            self.y_placeholder = tf.placeholder(tf.float32, [None, y_features])
+            self.x_placeholder = tf.placeholder(tf.float64, [None, x_features])
+            self.y_placeholder = tf.placeholder(tf.float64, [None, y_features])
 
             # Decide on the type of weight co-efficient regularisation to use based on what the user specified
             if regularization is None:
                 self.regularisation_function = None
-                self.regularisation_loss = 0
+                self.regularisation_loss = np.float64(0)
             elif regularization is 'L1':
                 self.regularisation_function = tf.contrib.layers.l1_regularizer(regularization_scale)
                 self.regularisation_loss = tf.losses.get_regularization_loss()
@@ -98,18 +99,21 @@ class MixtureDensityNetwork:
 
             # Setup of the outputs as a dictionary of output layers, by cycling over the names of outputs and the
             self.graph_output = {}
-            for output_name, activation_function in zip(loss_function.coefficient_names,
-                                                        loss_function.activation_functions):
+            for output_name, activation_function, bias_initializer, kernel_initializer in zip(
+                    loss_function.coefficient_names, loss_function.activation_functions,
+                    loss_function.bias_initializers, loss_function.kernel_initializers):
                 self.graph_output[output_name] = tf.layers.dense(self.graph_layers[-1], mixture_components,
                                                                  activation=activation_function,
-                                                                 kernel_regularizer=self.regularisation_function)
+                                                                 kernel_regularizer=self.regularisation_function,
+                                                                 bias_initializer=bias_initializer,
+                                                                 kernel_initializer=kernel_initializer)
 
             # Initialise the loss function (storing the user-specified one with the class) and training scheme
             self.loss_function = loss_function
             self.loss_function_tensor = tf.add(self.loss_function.tensor_evaluate(self.y_placeholder,
                                                                                   self.graph_output),
                                                self.regularisation_loss)
-            self.train_function = tf.train.AdamOptimizer().minimize(self.loss_function_tensor)
+            self.train_function = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(self.loss_function_tensor)
 
             # Initialise a tensorflow session object using our lovely graph we just made, and initialise the variables
             self.session = tf.Session()
@@ -118,24 +122,25 @@ class MixtureDensityNetwork:
         # Create a blank loss array we can append more stuff to later for recording the loss function evolution
         self.loss = np.array([])
 
-        # Initialise blank feed dictionaries
+        # Initialise blank feed dictionaries and a data range list we use to constrain later MAP value guessing
+        self.y_data_range = None
         self.training_data = None
         self.validation_data = None
 
         # Initialise scalers for the x and y data. We keep these with the class because it means that
         if x_scaling is 'min_max':
-            self.x_scaler = RobustScaler()
+            self.x_scaler = MinMaxScaler(feature_range=(0.1, 0.9))  # todo: feature ranges are hard coded!
         elif x_scaling is 'robust':
-            self.x_scaler = MinMaxScaler()
+            self.x_scaler = RobustScaler()
         elif x_scaling is None:
             self.x_scaler = None
         else:
             raise NotImplementedError('selected x scaling type has not been implemented!')
 
         if y_scaling is 'min_max':
-            self.y_scaler = RobustScaler()
+            self.y_scaler = MinMaxScaler(feature_range=(0.1, 0.9))
         elif y_scaling is 'robust':
-            self.y_scaler = MinMaxScaler(feature_range=(0.0001, 0.9999))
+            self.y_scaler = RobustScaler()
         elif y_scaling is None:
             self.y_scaler = None
         else:
@@ -162,6 +167,8 @@ class MixtureDensityNetwork:
         if self.y_scaler is not None:
             y_data = self.y_scaler.fit_transform(y_data)
 
+        self.y_data_range = [y_data.min(), y_data.max()]
+
         # Add the new x_data, y_data
         self.training_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
@@ -183,7 +190,7 @@ class MixtureDensityNetwork:
         # Add the new x_data, y_data
         self.validation_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
-    def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10) -> None:
+    def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10.) -> None:
         """Trains the tensorflow graph for the specified amount of time.
 
         Args:
@@ -239,7 +246,8 @@ class MixtureDensityNetwork:
                 while epochs_in_this_report < epochs_per_report:
                     epoch += 1
                     self.session.run(self.train_function, feed_dict=self.training_data)
-                    self.loss[epoch + start_epoch] = self.session.run(self.loss_function_tensor, feed_dict=self.training_data)
+                    self.loss[epoch + start_epoch] = self.session.run(self.loss_function_tensor,
+                                                                      feed_dict=self.training_data)
                     epochs_in_this_report += 1
 
                 # Calculate the new epoch time and ETA
@@ -334,17 +342,20 @@ class MixtureDensityNetwork:
             plt.yscale('log')
         plt.show()
 
-    def calculate_map(self, validation_data, reporting_interval: int=100):  # todo
+    def calculate_map(self, validation_data, reporting_interval: int=100):
         """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions."""
         print('Attempting to calculate the MAP values of all distributions...')
 
         # Define a function to minimise, multiplied by -1 to make sure we're minimising not maximising
         def function_to_minimise(x_data, my_object_dictionary, my_loss_function):
-            return -1 * my_loss_function.pdf(x_data, my_object_dictionary)
+            return -1 * my_loss_function.pdf_single_point(x_data, my_object_dictionary)
 
         # Create a blank array of np.nan values to populate with hopefully successful minimisations
         n_objects = validation_data[self.graph_output_names[0]].shape[0]
         map_values = np.empty(n_objects)
+
+        # A bit of setup for our initial guess of MAP values
+        guess_x_range = np.linspace(self.y_data_range[0], self.y_data_range[1], num=20)
 
         # Loop over each object and work out the MAP values for each
         i = 0
@@ -358,7 +369,8 @@ class MixtureDensityNetwork:
                 object_dictionary[a_name] = validation_data[a_name][i]
 
             # Make a sensible starting guess
-            starting_guess = 0.5
+            starting_guess = guess_x_range[np.argmax(self.loss_function.pdf_multiple_points(guess_x_range,
+                object_dictionary, sum_mixtures=True))]
 
             # Attempt to minimise and find the MAP value
             result = scipy_minimize(function_to_minimise, np.array([starting_guess]),
@@ -380,12 +392,70 @@ class MixtureDensityNetwork:
 
             i += 1
 
+        # Scale the data in reverse if we're using a y-data scaler
+        if self.y_scaler is not None:
+            finite_map_values = np.isfinite(map_values)
+            map_values[finite_map_values] = self.y_scaler.inverse_transform(map_values[finite_map_values]
+                                                                            .reshape(-1, 1)).flatten()
+
         # Calculate the mean number of iterations of the minimizer
         mean_number_of_iterations /= float(successes)
 
         print('Found MAP values for {:.2f}% of objects.'.format(100 * successes / float(n_objects)))
         print('Mean number of iterations = {}'.format(mean_number_of_iterations))
         return map_values
+
+    def plot_pdf(self, validation_data: dict, values_to_highlight, intrinsic_start: float=0., intrinsic_end: float=1.,
+                 resolution: int=100):
+        """Plots the mixture pdf of a given set of parameters.
+
+        Args:
+            validation_data (dict): as returned by network.validate, this is the validation data to plot with.
+            values_to_highlight (int, list-like of ints): IDs of the objects to plot pdfs for
+            intrinsic_start (float): start value of the pdf, in loss function space. Needs to be set sensibly based on
+                                     the properties of the data.
+            intrinsic_end (float): as above, but the end.
+            resolution (int): how many points to evaluate the pdf at.
+
+        Returns:
+            pretty graphs
+        """
+        # Typecast the list of values to highlight as a numpy 1D array
+        values_to_highlight = np.array([values_to_highlight]).flatten()
+        n_mixtures = validation_data[self.graph_output_names[0]][0, :].size
+
+        # Cycle over intrinsic_start and intrinsic_end. We scale back into actual value space later.
+        y_range = np.linspace(intrinsic_start, intrinsic_end, num=resolution)
+        actual_y_range = self.y_scaler.inverse_transform(y_range.reshape(-1, 1)).flatten()
+
+        # Setup a list of colours to plot each mixture with
+        colors = cm.viridis(np.linspace(0, 1, n_mixtures))
+
+        # Evaluate all the different pdfs.
+        for an_object in values_to_highlight:
+
+            # Make a dictionary that only has data on this specific galaxy
+            object_dictionary = {}
+            for a_name in self.graph_output_names:
+                object_dictionary[a_name] = validation_data[a_name][an_object]
+
+            # Get the pdf data, including a total probability
+            mixture_pdfs = self.loss_function.pdf_multiple_points(y_range, object_dictionary, sum_mixtures=False)
+            total_pdf = np.sum(mixture_pdfs, axis=0)
+
+            # Make some cool plots
+            plt.figure()
+
+            # Plot each mixture individually
+            for mixture_number, a_color in enumerate(colors):
+                plt.plot(actual_y_range, mixture_pdfs[mixture_number, :], '-', color=a_color,
+                         label='Mixture ' + str(mixture_number))
+
+            # Plot the total mixture
+            plt.plot(actual_y_range, total_pdf, 'k-', lw=4, label='Total pdf')
+            plt.legend(edgecolor='k', facecolor='w', fancybox=True)
+            plt.title('PDF of object ' + str(an_object))
+            plt.show()
 
     def calculate_5050(self):  # todo
         """Calculates the central mean of a given set of mixture distributions"""
@@ -421,7 +491,7 @@ if __name__ == '__main__':
     # plt.show()
 
     # Initialise the network
-    network = MixtureDensityNetwork(loss_funcs.NormalDistribution(), regularization='L2',
+    network = MixtureDensityNetwork(loss_funcs.NormalDistribution(), regularization=None,
                                     x_features=1, y_features=1, hidden_layers=2, layer_sizes=[25, 15],
                                     mixture_components=15)
 
@@ -437,6 +507,13 @@ if __name__ == '__main__':
 
     # Validate the network
     validation_results = network.validate()
+
+    # Calculate some MAP values
+    map_values = network.calculate_map(validation_results, reporting_interval=500)
+
+    # Plot some pdfs
+    network.plot_pdf(validation_results, [0, 1, 2, 3], intrinsic_start=0, intrinsic_end=1)
+
 
     # Some code to plot a validation plot. Firstly, we have to generate points to pull from:
     def generate_points(my_x_test, my_weights, my_means, my_std_deviations):
