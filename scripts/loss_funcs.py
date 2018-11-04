@@ -39,10 +39,11 @@ class NormalDistribution:
 
     def tensor_normal_distribution(self, a_point, my_means, my_std_deviations):
         """A normal distribution implemented in tensorflow notation."""
-        result = tf.subtract(a_point, my_means)
-        result = tf.multiply(result, tf.reciprocal(my_std_deviations))
-        result = -tf.square(result) / np.float64(2)
-        return tf.multiply(tf.exp(result), tf.reciprocal(my_std_deviations)) * self.one_div_sqrt_two_pi
+        with tf.variable_scope('normal_dist'):
+            result = tf.subtract(a_point, my_means)
+            result = tf.multiply(result, tf.reciprocal(my_std_deviations))
+            result = -tf.square(result) / np.float64(2)
+            return tf.multiply(tf.exp(result), tf.reciprocal(my_std_deviations)) * self.one_div_sqrt_two_pi
 
     def tensor_evaluate(self, a_point, coefficients):
         """Lossfunc defined in tensorflow notation.
@@ -54,15 +55,16 @@ class NormalDistribution:
         Returns:
             a float giving the loss
         """
-        # Calculate normal distribution mixture and normalise
-        result = self.tensor_normal_distribution(a_point, coefficients['means'], coefficients['std_deviations'])
-        result = tf.multiply(result, coefficients['weights'])
+        with tf.variable_scope('loss_func_evaluation'):
+            # Calculate normal distribution mixture and normalise
+            result = self.tensor_normal_distribution(a_point, coefficients['means'], coefficients['std_deviations'])
+            result = tf.multiply(result, coefficients['weights'])
 
-        # Sum the result and take the mean negative log
-        # todo: mean log is sensitive to outliers
-        result = tf.reduce_sum(result, 1, keepdims=True)
-        result = -tf.log(result)
-        return tf.reduce_mean(result)
+            # Sum the result and take the mean negative log
+            # todo: mean log is sensitive to outliers
+            result = tf.reduce_sum(result, 1, keepdims=True)
+            result = -tf.log(result)
+            return tf.reduce_mean(result)
 
     @staticmethod
     def pdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
@@ -85,9 +87,11 @@ class NormalDistribution:
         all_the_pdfs = np.empty((n_mixtures, x_data.size))
 
         # Cycle over each mixture and evaluate the pdf
-        for i, a_weight, a_mean, a_std_d in zip(enumerate(coefficients['weights']), coefficients['means'],
-                                                      coefficients['std_deviations']):
+        i = 0
+        for a_weight, a_mean, a_std_d in zip(coefficients['weights'], coefficients['means'],
+                                             coefficients['std_deviations']):
             all_the_pdfs[i, :] = scipy_normal.pdf(x_data, loc=a_mean, scale=a_std_d) * a_weight
+            i += 1
 
         # Sum if requested
         if sum_mixtures:
@@ -124,30 +128,33 @@ class BetaDistribution:
         self.activation_functions = [tf.nn.softmax, tf.exp, tf.exp]
 
         # Variable initializers for the weights (kernel) and biases of each output layer. Try to set them sensibly.
-        self.kernel_initializers = [tf.initializers.random_normal, tf.initializers.random_uniform,
+        self.kernel_initializers = [tf.initializers.random_uniform, tf.initializers.random_uniform,
                                     tf.initializers.random_uniform]
-        self.bias_initializers = [tf.initializers.ones, tf.initializers.zeros, tf.initializers.zeros]
+        self.bias_initializers = [tf.initializers.zeros, tf.initializers.zeros,
+                                  tf.initializers.zeros]
 
     @staticmethod
     def tensor_log_gamma(x):
         """A fast approximate log gamma function from Paul Mineiro. See:
         http://www.machinedlearnings.com/2011/06/faster-lda.html
         """
-        log_term = tf.log(x * (np.float64(1.0) + x) * (np.float64(2.0) + x))
-        x_plus_3 = np.float64(3.0) + x
-        return np.float64(-2.081061466) - x + np.float64(0.0833333) / x_plus_3 - log_term + (np.float64(2.5) + x) * tf.log(x_plus_3)
+        with tf.variable_scope('gamma_dist'):
+            log_term = tf.log(x * (1.0 + x) * (2.0 + x))
+            x_plus_3 = 3.0 + x
+            return -2.081061466 - x + 0.0833333 / x_plus_3 - log_term + (2.5 + x) * tf.log(x_plus_3)
 
     def tensor_beta_distribution(self, a_point, alpha, beta):
         """An APPROXIMATE (& fast) beta distribution implemented in tensorflow notation."""
-        exp1 = tf.subtract(alpha, np.float64(1.0))
-        exp2 = tf.subtract(beta, np.float64(1.0))
-        d1 = tf.multiply(exp1, tf.log(a_point))
-        d2 = tf.multiply(exp2, tf.log(tf.subtract(np.float64(1.0), a_point)))
-        f1 = tf.add(d1, d2)
-        f2 = self.tensor_log_gamma(alpha)
-        f3 = self.tensor_log_gamma(beta)
-        f4 = self.tensor_log_gamma(alpha + beta)
-        return tf.exp(tf.add((tf.subtract(f4, tf.add(f2, f3))), f1))
+        with tf.variable_scope('beta_dist'):
+            exp1 = tf.subtract(alpha, 1.0)
+            exp2 = tf.subtract(beta, 1.0)
+            d1 = tf.multiply(exp1, tf.log(a_point))
+            d2 = tf.multiply(exp2, tf.log(tf.subtract(1.0, a_point)))
+            f1 = tf.add(d1, d2)
+            f2 = self.tensor_log_gamma(alpha)
+            f3 = self.tensor_log_gamma(beta)
+            f4 = self.tensor_log_gamma(alpha + beta)
+            return tf.exp(tf.add((tf.subtract(f4, tf.add(f2, f3))), f1))
 
     def tensor_evaluate(self, a_point, coefficients):
         """Lossfunc defined in tensorflow notation.
@@ -159,14 +166,16 @@ class BetaDistribution:
         Returns:
             a float giving the loss
         """
-        # Calculate normal distribution mixture and normalise
-        result = self.tensor_beta_distribution(a_point, coefficients['alpha'], coefficients['beta'])
-        result = tf.multiply(result, coefficients['weights'])
+        with tf.variable_scope('loss_func_evaluation'):
+            # Calculate normal distribution mixture and normalise
+            result = self.tensor_beta_distribution(a_point, coefficients['alpha'], coefficients['beta'])
+            result = tf.multiply(result, coefficients['weights'])
 
-        # Sum the result and take the mean negative log
-        result = tf.reduce_sum(result, 1, keepdims=True)
-        result = -tf.log(result)
-        return tf.reduce_mean(result)
+            # Sum the result and take the mean negative log
+            result = tf.reduce_sum(result, 1, keepdims=True)
+            result = -tf.log(result)
+            # result = tf.where(tf.is_nan(result), tf.ones_like(result) * 10000, result)
+            return tf.reduce_mean(result)
 
     @staticmethod
     def pdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
@@ -189,9 +198,11 @@ class BetaDistribution:
         all_the_pdfs = np.empty((n_mixtures, x_data.size))
 
         # Cycle over each mixture and evaluate the pdf
-        for i, a_weight, a_alpha, a_beta in enumerate(zip(coefficients['weights'], coefficients['alpha'],
-                                                      coefficients['beta'])):
+        i = 0
+        for a_weight, a_alpha, a_beta in zip(coefficients['weights'], coefficients['alpha'],
+                                             coefficients['beta']):
             all_the_pdfs[i, :] = scipy_beta.pdf(x_data, a_alpha, a_beta) * a_weight
+            i += 1
 
         # Sum if requested
         if sum_mixtures:

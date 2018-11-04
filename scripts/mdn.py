@@ -4,9 +4,10 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import time
-import sys
 from matplotlib import cm
 from scripts import loss_funcs
+from scripts.twitter import calc_local_time
+from scripts.twitter import short_time_now
 from typing import Optional
 from sklearn.model_selection import train_test_split
 from scipy.optimize import minimize as scipy_minimize
@@ -14,110 +15,116 @@ from sklearn.preprocessing import RobustScaler
 from sklearn.preprocessing import MinMaxScaler
 
 
-def set_seeds(seed=42):
-    """Sets seed in numpy and tensorflow. Allows for repeatability!
-
-    Args:
-        seed (int, float): universal seed to set in tf and numpy. Default is 42.
-    """
-    np.random.seed(seed)
-    tf.set_random_seed(seed)
-
-
-def calc_local_time(input_time):
-    """Convenience function to convert any times to prettier time strings.
-
-    Args:
-        input_time (float): the time.time() in seconds you wish to convert to a nice string.
-    """
-    return time.strftime('%c', time.localtime(input_time))
-
-
 class MixtureDensityNetwork:
 
-    def __init__(self, loss_function, regularization: Optional[str]=None, regularization_scale=0.1,
+    def __init__(self, loss_function, summary_directory: str, regularization: Optional[str]=None, regularization_scale=0.1,
                  x_features: int=1, y_features: int=1, x_scaling: Optional[str]=None, y_scaling: Optional[str]=None,
-                 hidden_layers: int=2, layer_sizes=15, mixture_components: int=5, learning_rate=0.001) -> None:
+                 layer_sizes=15, mixture_components: int=5, learning_rate=0.001) -> None:
         """Initialises a mixture density network in tensorflow given the specified (or default) parameters.
 
         Args:
             loss_function (loss_funcs class): an instance of the desired loss function to use.
+            summary_directory (str): location of where we want TensorBoard to write our summaries to.
             regularization (str): controls the type of weight regularisation. Accepts 'none' (default), 'L1' or 'L2'.
             x_features (int): number of input x data points. Default is 1.
             y_features (int): number of input y data points
-            hidden_layers (int): number of hidden layers
-            layer_sizes (int, list-like): sizes of all layers (int) or a list of different sizes of each layer.
+            layer_sizes (int, list-like): size of one layer (int) or a list of different sizes of each layer.
             mixture_components (int): number of mixtures to try to use
 
         Returns:
             None
         """
-        # Work out whether or not layer_sizes is a list of layer sizes or an integer. If it's just an integer,
-        # then make it into an array of the same integer repeated.
-        if isinstance(layer_sizes, int):
-            layer_sizes = np.ones(hidden_layers, dtype=int) * layer_sizes
+        # Cast layer_sizes as a 1D numpy array and use it to calculate how many hidden layers there should be
+        layer_sizes = np.array([layer_sizes]).flatten()
+        hidden_layers = layer_sizes.size
 
         # Create a tensorflow graph for this class
-        self.graph = tf.Graph()
-        self.graph_output_names = loss_function.coefficient_names
+
+        with tf.name_scope('graph'):
+            self.graph = tf.Graph()
+            self.graph_output_names = loss_function.coefficient_names
 
         # Setup our graph
         with self.graph.as_default():
+            # Set seeds for reproducibility
+            self.set_seeds()
+
             # Placeholders for input data
-            self.x_placeholder = tf.placeholder(tf.float64, [None, x_features])
-            self.y_placeholder = tf.placeholder(tf.float64, [None, y_features])
+            with tf.variable_scope('data'):
+                self.x_placeholder = tf.placeholder(tf.float32, [None, x_features], name='x')
+                self.y_placeholder = tf.placeholder(tf.float32, [None, y_features], name='y')
 
             # Decide on the type of weight co-efficient regularisation to use based on what the user specified
-            if regularization is None:
-                self.regularisation_function = None
-                self.regularisation_loss = np.float64(0)
-            elif regularization is 'L1':
-                self.regularisation_function = tf.contrib.layers.l1_regularizer(regularization_scale)
-                self.regularisation_loss = tf.losses.get_regularization_loss()
-            elif regularization is 'L2':
-                self.regularisation_function = tf.contrib.layers.l2_regularizer(regularization_scale)
-                self.regularisation_loss = tf.losses.get_regularization_loss()
-            else:
-                raise ValueError('specified regularisation type is invalid or unsupported.')
+            with tf.variable_scope('regularization'):
+                if regularization is None:
+                    self.regularisation_function = None
+                    self.loss_from_regularisation = np.float32(0)
+                elif regularization is 'L1':
+                    self.regularisation_function = tf.contrib.layers.l1_regularizer(regularization_scale)
+                    self.loss_from_regularisation = tf.losses.get_regularization_loss()
+                elif regularization is 'L2':
+                    self.regularisation_function = tf.contrib.layers.l2_regularizer(regularization_scale)
+                    self.loss_from_regularisation = tf.losses.get_regularization_loss()
+                else:
+                    raise ValueError('specified regularisation type is invalid or unsupported.')
 
             # Setup of the requisite number of layers, kept in a list - this lets us use easy numerical indexes
             # (including just -1 to get to the last one) to access different hidden layers.
             i = 0
-            self.graph_layers = []
+            with tf.variable_scope('hidden_layers'):
+                self.graph_layers = []
 
-            # Join layers to x data
-            self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i], activation=tf.nn.relu,
-                                                     kernel_regularizer=self.regularisation_function))
+                # Join layers to x data
+                self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i], activation=tf.nn.relu,
+                                                         kernel_regularizer=self.regularisation_function,
+                                                         name='hidden_layer_1'))
 
-            # Join layers to each other from here on out
-            i += 1
-            while i < hidden_layers:
-                self.graph_layers.append(tf.layers.dense(self.graph_layers[i - 1], layer_sizes[i],
-                                                         activation=tf.nn.relu,
-                                                         kernel_regularizer=self.regularisation_function))
+                # Join layers to each other from here on out
                 i += 1
+                while i < hidden_layers:
+                    self.graph_layers.append(tf.layers.dense(self.graph_layers[i - 1], layer_sizes[i],
+                                                             activation=tf.nn.relu,
+                                                             kernel_regularizer=self.regularisation_function,
+                                                             name='hidden_layer_' + str(i+1)))
+                    i += 1
 
             # Setup of the outputs as a dictionary of output layers, by cycling over the names of outputs and the
-            self.graph_output = {}
-            for output_name, activation_function, bias_initializer, kernel_initializer in zip(
-                    loss_function.coefficient_names, loss_function.activation_functions,
-                    loss_function.bias_initializers, loss_function.kernel_initializers):
-                self.graph_output[output_name] = tf.layers.dense(self.graph_layers[-1], mixture_components,
-                                                                 activation=activation_function,
-                                                                 kernel_regularizer=self.regularisation_function,
-                                                                 bias_initializer=bias_initializer,
-                                                                 kernel_initializer=kernel_initializer)
+            with tf.variable_scope('output_layers'):
+                self.graph_output = {}
+                for output_name, activation_function, bias_initializer, kernel_initializer in zip(
+                        loss_function.coefficient_names, loss_function.activation_functions,
+                        loss_function.bias_initializers, loss_function.kernel_initializers):
+                    self.graph_output[output_name] = tf.layers.dense(self.graph_layers[-1], mixture_components,
+                                                                     activation=activation_function,
+                                                                     kernel_regularizer=self.regularisation_function,
+                                                                     name='output_' + output_name)
+                                                                     #bias_initializer=bias_initializer,
+                                                                     #kernel_initializer=kernel_initializer
 
             # Initialise the loss function (storing the user-specified one with the class) and training scheme
-            self.loss_function = loss_function
-            self.loss_function_tensor = tf.add(self.loss_function.tensor_evaluate(self.y_placeholder,
-                                                                                  self.graph_output),
-                                               self.regularisation_loss)
-            self.train_function = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(self.loss_function_tensor)
+            with tf.variable_scope('loss_calculation'):
+                self.loss_function = loss_function
+                self.loss_from_function = self.loss_function.tensor_evaluate(self.y_placeholder, self.graph_output)
+                self.loss_total = tf.add(self.loss_from_function, self.loss_from_regularisation)
+                self.train_function = tf.train.AdamOptimizer(learning_rate=learning_rate,
+                                                                name='optimizer').minimize(self.loss_total)
 
             # Initialise a tensorflow session object using our lovely graph we just made, and initialise the variables
             self.session = tf.Session()
             self.session.run(tf.global_variables_initializer())
+
+            # Initialise some performance evaluation tools
+            with tf.variable_scope('summaries'):
+                self.summary_loss_function = tf.summary.scalar('s_loss_function', self.loss_from_function)
+                self.summary_regularisation = tf.summary.scalar('s_regularisation_loss', self.loss_from_regularisation)
+
+                # Create a summary of the tf.layers variables
+                self.summary_of_variables = {}
+                for a_var in tf.trainable_variables():
+                    self.summary_of_variables[str(a_var)] = tf.summary.histogram(a_var.name, a_var)
+
+                # Make us a cheeky summary writer to write all of our summaries to file
+                self.summary_writer = tf.summary.FileWriter(summary_directory, self.graph)
 
         # Create a blank loss array we can append more stuff to later for recording the loss function evolution
         self.loss = np.array([])
@@ -148,6 +155,16 @@ class MixtureDensityNetwork:
 
         print('An MDN has been initialised!')
 
+    @staticmethod
+    def set_seeds(seed=42):
+        """Sets seed in numpy and tensorflow. Allows for repeatability!
+
+        Args:
+            seed (int, float): universal seed to set in tf and numpy. Default is 42.
+        """
+        np.random.seed(seed)
+        tf.set_random_seed(seed)
+
     def __del__(self):
         """Closes the tensorflow session."""
         self.session.close()
@@ -167,6 +184,7 @@ class MixtureDensityNetwork:
         if self.y_scaler is not None:
             y_data = self.y_scaler.fit_transform(y_data)
 
+        # Keep an idea of what the maximum and minimum training data range is. This is helpful for plotting later.
         self.y_data_range = [y_data.min(), y_data.max()]
 
         # Add the new x_data, y_data
@@ -224,8 +242,13 @@ class MixtureDensityNetwork:
         with self.graph.as_default():
             # Time the first step to get an estimate of how long each step will take
             epoch_time = time.time()
+
+            summary_merge = tf.summary.merge_all()
             self.session.run(self.train_function, feed_dict=self.training_data)
-            self.loss[epoch + start_epoch] = self.session.run(self.loss_function_tensor, feed_dict=self.training_data)
+            self.loss[epoch + start_epoch] = self.session.run(self.loss_total, feed_dict=self.training_data)
+            summary = self.session.run(summary_merge, feed_dict=self.training_data)
+            self.summary_writer.add_summary(summary, epoch + start_epoch)
+
             epoch_time = time.time() - epoch_time
 
             # Cycle over, doing some running
@@ -244,10 +267,21 @@ class MixtureDensityNetwork:
                 # Run for requisite number of epochs until refresh (this stops print from being spammed on fast code)
                 epochs_in_this_report = 0
                 while epochs_in_this_report < epochs_per_report:
+                    # Train the network in a new epoch
                     epoch += 1
+                    summary_merge = tf.summary.merge_all()
                     self.session.run(self.train_function, feed_dict=self.training_data)
-                    self.loss[epoch + start_epoch] = self.session.run(self.loss_function_tensor,
+
+                    # Calculate loss and make sure it isn't a nan
+                    self.loss[epoch + start_epoch] = self.session.run(self.loss_total,
                                                                       feed_dict=self.training_data)
+                    if np.isnan(self.loss[epoch + start_epoch]):
+                        exit_reason = 'nan loss encountered'
+                        break
+
+                    # Write out the summaries
+                    summary = self.session.run(summary_merge, feed_dict=self.training_data)
+                    self.summary_writer.add_summary(summary, epoch + start_epoch)
                     epochs_in_this_report += 1
 
                 # Calculate the new epoch time and ETA
@@ -267,6 +301,9 @@ class MixtureDensityNetwork:
                 # Decide if we need to end
                 if now_time > cutoff_time:
                     exit_reason = 'time limit reached'
+                    break
+                if exit_reason is 'nan loss encountered':
+                    break
 
                 have_done_more_than_one_step = True
                 step_end_time = time.time()
@@ -342,8 +379,17 @@ class MixtureDensityNetwork:
             plt.yscale('log')
         plt.show()
 
-    def calculate_map(self, validation_data, reporting_interval: int=100):
-        """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions."""
+    def calculate_map(self, validation_data, reporting_interval: int=100, resolution: int=20):
+        """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions.
+        Args:
+            validation_data (dict): the data from a .validate call.
+            reporting_interval (int): how often to let the user know which objects we're working on. Default: 100.
+            resolution (int): number of points to test against when finding the initial guess.
+
+        Returns:
+            A list of all MAP values for objects in validation_data. Fails to calculate MAP values will return a np.nan.
+
+        """
         print('Attempting to calculate the MAP values of all distributions...')
 
         # Define a function to minimise, multiplied by -1 to make sure we're minimising not maximising
@@ -353,9 +399,10 @@ class MixtureDensityNetwork:
         # Create a blank array of np.nan values to populate with hopefully successful minimisations
         n_objects = validation_data[self.graph_output_names[0]].shape[0]
         map_values = np.empty(n_objects)
+        map_values[:] = np.nan
 
         # A bit of setup for our initial guess of MAP values
-        guess_x_range = np.linspace(self.y_data_range[0], self.y_data_range[1], num=20)
+        guess_x_range = np.linspace(self.y_data_range[0], self.y_data_range[1], num=resolution)
 
         # Loop over each object and work out the MAP values for each
         i = 0
@@ -405,28 +452,34 @@ class MixtureDensityNetwork:
         print('Mean number of iterations = {}'.format(mean_number_of_iterations))
         return map_values
 
-    def plot_pdf(self, validation_data: dict, values_to_highlight, intrinsic_start: float=0., intrinsic_end: float=1.,
-                 resolution: int=100):
+    def plot_pdf(self, validation_data: dict, values_to_highlight, data_range=None, resolution: int=100,
+                 map_values=None):
         """Plots the mixture pdf of a given set of parameters.
 
         Args:
             validation_data (dict): as returned by network.validate, this is the validation data to plot with.
-            values_to_highlight (int, list-like of ints): IDs of the objects to plot pdfs for
-            intrinsic_start (float): start value of the pdf, in loss function space. Needs to be set sensibly based on
-                                     the properties of the data.
-            intrinsic_end (float): as above, but the end.
+            values_to_highlight (int, list-like of ints): IDs of the objects to plot pdfs for. Default: None.
+            data_range (list-like of floats): The range
             resolution (int): how many points to evaluate the pdf at.
+            map_values (
 
         Returns:
             pretty graphs
         """
+        # See if the user specified their own data range
+        if data_range is None:
+            data_range = self.y_data_range
+
         # Typecast the list of values to highlight as a numpy 1D array
         values_to_highlight = np.array([values_to_highlight]).flatten()
         n_mixtures = validation_data[self.graph_output_names[0]][0, :].size
 
         # Cycle over intrinsic_start and intrinsic_end. We scale back into actual value space later.
-        y_range = np.linspace(intrinsic_start, intrinsic_end, num=resolution)
-        actual_y_range = self.y_scaler.inverse_transform(y_range.reshape(-1, 1)).flatten()
+        y_range = np.linspace(data_range[0], data_range[1], num=resolution)
+        if self.y_scaler is not None:
+            actual_y_range = self.y_scaler.inverse_transform(y_range.reshape(-1, 1)).flatten()
+        else:
+            actual_y_range = y_range
 
         # Setup a list of colours to plot each mixture with
         colors = cm.viridis(np.linspace(0, 1, n_mixtures))
@@ -448,27 +501,26 @@ class MixtureDensityNetwork:
 
             # Plot each mixture individually
             for mixture_number, a_color in enumerate(colors):
-                plt.plot(actual_y_range, mixture_pdfs[mixture_number, :], '-', color=a_color,
+                plt.plot(actual_y_range, mixture_pdfs[mixture_number, :], '-', lw=1, color=a_color,
                          label='Mixture ' + str(mixture_number))
 
             # Plot the total mixture
-            plt.plot(actual_y_range, total_pdf, 'k-', lw=4, label='Total pdf')
+            plt.plot(actual_y_range, total_pdf, 'k--', lw=2, label='Total pdf', alpha=0.5)
+
+            # If specified, plot the MAP value
+            if map_values is not None:
+                plt.plot([map_values[an_object], map_values[an_object]], [total_pdf.min(), total_pdf.max()],
+                         'r-', label='MAP value')
+
             plt.legend(edgecolor='k', facecolor='w', fancybox=True)
             plt.title('PDF of object ' + str(an_object))
             plt.show()
-
-    def calculate_5050(self):  # todo
-        """Calculates the central mean of a given set of mixture distributions"""
-        pass
 
 
 # Unit tests: implements the class on the toy_mdn_emily example data, using data from the following blog post:
 # http://blog.otoro.net/2015/11/24/mixture-density-networks-with-tensorflow/
 if __name__ == '__main__':
     print('Commencing mdn.py unit tests!')
-
-    # Set the seed
-    set_seeds()
 
     # Create some data to play with
     def build_toy_dataset(dataset_size):
@@ -491,9 +543,11 @@ if __name__ == '__main__':
     # plt.show()
 
     # Initialise the network
-    network = MixtureDensityNetwork(loss_funcs.NormalDistribution(), regularization=None,
-                                    x_features=1, y_features=1, hidden_layers=2, layer_sizes=[25, 15],
-                                    mixture_components=15)
+    network = MixtureDensityNetwork(loss_funcs.NormalDistribution(),
+                                    './logs/mdn_tests/' + short_time_now(),
+                                    regularization='L2',
+                                    x_features=1, y_features=1, layer_sizes=[20, 20],
+                                    mixture_components=15, learning_rate=1e-2)
 
     # Set the data
     network.set_training_data(x_train, y_train)
@@ -512,7 +566,7 @@ if __name__ == '__main__':
     map_values = network.calculate_map(validation_results, reporting_interval=500)
 
     # Plot some pdfs
-    network.plot_pdf(validation_results, [0, 1, 2, 3], intrinsic_start=0, intrinsic_end=1)
+    network.plot_pdf(validation_results, [0, 100, 200], map_values=map_values)
 
 
     # Some code to plot a validation plot. Firstly, we have to generate points to pull from:

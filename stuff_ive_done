@@ -12,6 +12,14 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+02/11/18
+- Added some pdf plotting features, still need some bugfixing though
+- Hit some mad bugs with nans appearing for no apparent reason
+- Fixed temporarily with 64 bit precision, but this needs fixing long-term (probs helped by TensorBoard) in a better, less computationally intensive way
+
+01/11/18
+- Had a bit of a sad. It's ok though :)
+
 31/10/18
 - Running successfully on blog example stuff (yay!)
 - Now using a couple of data scaling systems from sklearn, which are implemented in MixtureDensityNetwork (this needs better testing, and a way to spec scaling options on the minmax scaler)

@@ -2,11 +2,10 @@
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import RobustScaler
-from sklearn.preprocessing import MinMaxScaler
 from scripts import mdn
 from scripts import loss_funcs
 from scripts import z_plot
+from scripts import twitter
 
 
 # Import the data
@@ -23,8 +22,6 @@ y_validate = np.asarray(data_validation['redshift']).reshape(10000, 1)
 signal_noise_levels = ['SN_1', 'SN_2', 'SN_3', 'SN_4', 'SN_5']
 bands = ['g', 'r', 'i', 'z', 'y']
 
-quit()
-
 # Get validation data for each signal to noise level iteratively
 for a_signal_noise in signal_noise_levels:
 
@@ -38,15 +35,32 @@ for a_signal_noise in signal_noise_levels:
     x_validate[a_signal_noise] = np.asarray(data_validation[x_keys_to_get])
 
 
-# Setup our network
-mdn.set_seeds()
-network = mdn.MixtureDensityNetwork(loss_funcs.BetaDistribution(), regularization='L2',
-                                    x_scaling='robust', y_scaling='min_max', x_features=10, y_features=1,
-                                    hidden_layers=3, layer_sizes=[20, 20, 10], mixture_components=5, learning_rate=1e-3)
-network.set_training_data(x_train, y_train)
 
-# Run this puppy!
-network.train(max_epochs=2000, max_runtime=1.0)
+# Initialise twitter
+
+
+# Cycle over a number of different network configurations
+rates = [5e-3, 1e-3, 5e-4, 1e-4, 5e-5]
+sizes = [[20, 20],
+         [20, 20, 20],
+         [20, 20, 10]]
+run_names = []
+
+for a_rate in rates:
+
+    print('==========================================')
+    print(a_rate)
+    # Setup our network
+    network = mdn.MixtureDensityNetwork(loss_funcs.BetaDistribution(), './logs/adam_diagnostics/' + str(a_rate) + 'L0', regularization=None,
+                                        x_scaling='robust', y_scaling='min_max', x_features=10, y_features=1,
+                                        layer_sizes=[20, 20, 20], mixture_components=5, learning_rate=a_rate)
+    network.set_training_data(x_train, y_train)
+
+    # Run this thing!
+    network.train(max_epochs=2000, max_runtime=1.0)
+
+
+"""
 network.plot_loss_function_evolution()
 
 # Calculate how well everything worked!
@@ -65,6 +79,8 @@ for a_signal_noise in signal_noise_levels:
 colors = ['r', 'g', 'c', 'b', 'm']
 for a_signal_noise, a_color in zip(signal_noise_levels, colors):
     z_plot.phot_vs_spec(y_validate[:points_to_use], validation_redshifts[a_signal_noise],
-                        save_name='./plots/18-11-2_blog_' + a_signal_noise + '.png',
+                        save_name='./plots/18-11-4_blog_' + a_signal_noise + '.png',
                         plt_title='Blog data: true vs inferred redshift at ' + a_signal_noise,
                         point_alpha=0.2, point_color=a_color, limits=[0, 3.0])
+
+"""
