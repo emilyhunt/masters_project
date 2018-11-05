@@ -58,13 +58,13 @@ class MixtureDensityNetwork:
             with tf.variable_scope('regularization'):
                 if regularization is None:
                     self.regularisation_function = None
-                    self.loss_from_regularisation = np.float32(0)
+                    #self.loss_from_regularisation = np.float32(0)
                 elif regularization is 'L1':
                     self.regularisation_function = tf.contrib.layers.l1_regularizer(regularization_scale)
-                    self.loss_from_regularisation = tf.losses.get_regularization_loss()
+                    #self.loss_from_regularisation = tf.losses.get_regularization_loss()
                 elif regularization is 'L2':
                     self.regularisation_function = tf.contrib.layers.l2_regularizer(regularization_scale)
-                    self.loss_from_regularisation = tf.losses.get_regularization_loss()
+                    #self.loss_from_regularisation = tf.losses.get_regularization_loss()
                 else:
                     raise ValueError('specified regularisation type is invalid or unsupported.')
 
@@ -75,7 +75,7 @@ class MixtureDensityNetwork:
                 self.graph_layers = []
 
                 # Join layers to x data
-                self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i], activation=tf.nn.relu,
+                self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i], activation=tf.nn.tanh,
                                                          kernel_regularizer=self.regularisation_function,
                                                          name='hidden_layer_1'))
 
@@ -83,7 +83,7 @@ class MixtureDensityNetwork:
                 i += 1
                 while i < hidden_layers:
                     self.graph_layers.append(tf.layers.dense(self.graph_layers[i - 1], layer_sizes[i],
-                                                             activation=tf.nn.relu,
+                                                             activation=tf.nn.tanh,
                                                              kernel_regularizer=self.regularisation_function,
                                                              name='hidden_layer_' + str(i+1)))
                     i += 1
@@ -101,13 +101,19 @@ class MixtureDensityNetwork:
                                                                      #bias_initializer=bias_initializer,
                                                                      #kernel_initializer=kernel_initializer
 
+            # Collect all the regularization losses
+            with tf.variable_scope('regularization'):
+                if regularization is None:
+                    self.loss_from_regularisation = np.float32(0)
+                else:
+                    self.loss_from_regularisation = tf.losses.get_regularization_loss()
+
             # Initialise the loss function (storing the user-specified one with the class) and training scheme
             with tf.variable_scope('loss_calculation'):
                 self.loss_function = loss_function
                 self.loss_from_function = self.loss_function.tensor_evaluate(self.y_placeholder, self.graph_output)
                 self.loss_total = tf.add(self.loss_from_function, self.loss_from_regularisation)
-                self.train_function = tf.train.AdamOptimizer(learning_rate=learning_rate,
-                                                                name='optimizer').minimize(self.loss_total)
+                self.train_function = tf.train.AdamOptimizer(learning_rate=learning_rate, name='optimizer').minimize(self.loss_total)
 
             # Initialise a tensorflow session object using our lovely graph we just made, and initialise the variables
             self.session = tf.Session()
@@ -208,7 +214,7 @@ class MixtureDensityNetwork:
         # Add the new x_data, y_data
         self.validation_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
-    def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10.) -> None:
+    def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10.):
         """Trains the tensorflow graph for the specified amount of time.
 
         Args:
@@ -315,6 +321,8 @@ class MixtureDensityNetwork:
         print('epochs done = {}'.format(epoch))
         print('==========================')
 
+        return [exit_reason, epoch]
+
     def save_graph(self, location: str):
         """Saves a complete copy of the current network to a specified location.
         Args:
@@ -355,7 +363,8 @@ class MixtureDensityNetwork:
 
         return result
 
-    def plot_loss_function_evolution(self, start: int=0, end: int=-1, y_log: bool=False) -> None:
+    def plot_loss_function_evolution(self, start: int=0, end: int=-1, y_log: bool=False,
+                                     figure_directory: Optional=None) -> None:
         """Returns a plot of the change of the loss function over time.
 
         Args:
@@ -374,9 +383,14 @@ class MixtureDensityNetwork:
         plt.plot(np.arange(start, end), self.loss[start:end], 'r-')
         plt.title('Loss function evolution')
 
-        # Set the plot to be log if desired, and show
+        # Set the plot to be log if desired
         if y_log:
             plt.yscale('log')
+
+        # Save if desired
+        if figure_directory is not None:
+            plt.savefig(figure_directory + '_lossf.png')
+
         plt.show()
 
     def calculate_map(self, validation_data, reporting_interval: int=100, resolution: int=20):
@@ -453,7 +467,7 @@ class MixtureDensityNetwork:
         return map_values
 
     def plot_pdf(self, validation_data: dict, values_to_highlight, data_range=None, resolution: int=100,
-                 map_values=None):
+                 map_values=None, figure_directory: Optional[str]=None):
         """Plots the mixture pdf of a given set of parameters.
 
         Args:
@@ -461,7 +475,7 @@ class MixtureDensityNetwork:
             values_to_highlight (int, list-like of ints): IDs of the objects to plot pdfs for. Default: None.
             data_range (list-like of floats): The range
             resolution (int): how many points to evaluate the pdf at.
-            map_values (
+            map_values ( #todo FINISH YOUR FUCKING DOCSTRINGS EMILY FFS
 
         Returns:
             pretty graphs
@@ -514,6 +528,11 @@ class MixtureDensityNetwork:
 
             plt.legend(edgecolor='k', facecolor='w', fancybox=True)
             plt.title('PDF of object ' + str(an_object))
+
+            # Save if desired
+            if figure_directory is not None:
+                plt.savefig(figure_directory + '_pdf_' + str(an_object) + '.png')
+
             plt.show()
 
 
@@ -522,7 +541,7 @@ class MixtureDensityNetwork:
 if __name__ == '__main__':
     print('Commencing mdn.py unit tests!')
 
-    # Create some data to play with
+    # Create some data to play wit1h
     def build_toy_dataset(dataset_size):
         y_data = np.random.uniform(-10.5, 10.5, dataset_size)
         r_data = np.random.normal(size=dataset_size)  # random noise
@@ -544,8 +563,8 @@ if __name__ == '__main__':
 
     # Initialise the network
     network = MixtureDensityNetwork(loss_funcs.NormalDistribution(),
-                                    './logs/mdn_tests/' + short_time_now(),
-                                    regularization='L2',
+                                    './logs/mdn_tests_tensorboard/' + str(time.strftime('%H-%M-%S', time.localtime(time.time()))),
+                                    regularization='L1',
                                     x_features=1, y_features=1, layer_sizes=[20, 20],
                                     mixture_components=15, learning_rate=1e-2)
 
@@ -554,7 +573,7 @@ if __name__ == '__main__':
     network.set_validation_data(x_test, y_test)
 
     # Train the network for max_epochs epochs
-    network.train(max_epochs=3000)
+    network.train(max_epochs=500)
 
     # Plot the loss function
     network.plot_loss_function_evolution()

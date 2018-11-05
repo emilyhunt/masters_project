@@ -97,7 +97,7 @@ def short_time_now(date_only: bool=False, time_only: bool=False):
 
 def initial_text(thing_this_is_training: str):
     """Helper function that creates initial text to tweet."""
-    return ('Beginning training to ' + thing_this_is_training + '. \nStart time is'
+    return ('Beginning training to ' + thing_this_is_training + '. \nStart time is '
             + time_now())
 
 
@@ -114,7 +114,7 @@ def update_text(thing_thats_done: str, next_thing: Optional[str]=None):
 
 def annoy_me(thing_thats_annoying: str):
     """Helper function that tweets at me."""
-    return 'Hey, @emilydoesastro! ' + thing_thats_annoying
+    return time_now() + ' - Hey, @emilydoesastro! ' + thing_thats_annoying
 
 
 
