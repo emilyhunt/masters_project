@@ -5,7 +5,7 @@ from typing import Optional
 
 class TweetWriter:
 
-    def __init__(self, auth_dir='/home/emily/documents/realemilyastrokeys'):
+    def __init__(self, auth_dir='./realemilyastrokeys'):
         """Creates a connection to the """
         # Read in the keys from my file
         auth_file = open(auth_dir, 'r')
@@ -97,7 +97,7 @@ def short_time_now(date_only: bool=False, time_only: bool=False):
 
 def initial_text(thing_this_is_training: str):
     """Helper function that creates initial text to tweet."""
-    return ('Beginning training to ' + thing_this_is_training + '. \nStart time is '
+    return ('Beginning training ' + thing_this_is_training + '. \nStart time is '
             + time_now())
 
 
@@ -121,7 +121,7 @@ def annoy_me(thing_thats_annoying: str):
 if __name__ is '__main__':
     # todo tests
 
-    twitter = TweetWriter()
+    twitter = TweetWriter(auth_dir='../real_emily_astro_keys')
 
     twitter.write('This tweet is from a manually initiated test of twitter.py at ' + time_now() + '.')
     twitter.write('Did you know I can tweet images?', file='../plots/18-10-23_my_third_nn_res.png', reply_to=-1)

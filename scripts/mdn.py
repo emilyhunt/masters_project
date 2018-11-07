@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import gc
 from matplotlib import cm
 from scripts import loss_funcs
 from scripts.twitter import calc_local_time
@@ -121,8 +122,10 @@ class MixtureDensityNetwork:
 
             # Initialise some performance evaluation tools
             with tf.variable_scope('summaries'):
-                self.summary_loss_function = tf.summary.scalar('s_loss_function', self.loss_from_function)
-                self.summary_regularisation = tf.summary.scalar('s_regularisation_loss', self.loss_from_regularisation)
+                self.summary_loss_function = tf.summary.scalar('loss_function', self.loss_from_function)
+                self.summary_loss_regularisation = tf.summary.scalar('loss_regularisation',
+                                                                     self.loss_from_regularisation)
+                self.summary_loss_total = tf.summary.scalar('loss_total', self.loss_total)
 
                 # Create a summary of the tf.layers variables
                 self.summary_of_variables = {}
@@ -139,6 +142,10 @@ class MixtureDensityNetwork:
         self.y_data_range = None
         self.training_data = None
         self.validation_data = None
+
+        # An exit reason to keep class-wide and a training_success bool that we can use to prevent plotting
+        self.exit_reason = None
+        self.training_success = True
 
         # Initialise scalers for the x and y data. We keep these with the class because it means that
         if x_scaling is 'min_max':
@@ -252,13 +259,19 @@ class MixtureDensityNetwork:
             summary_merge = tf.summary.merge_all()
             self.session.run(self.train_function, feed_dict=self.training_data)
             self.loss[epoch + start_epoch] = self.session.run(self.loss_total, feed_dict=self.training_data)
+
+            if np.isnan(self.loss[epoch + start_epoch]):
+                self.exit_reason = 'nan loss encountered'
+                self.training_success = False
+                return [self.exit_reason, epoch, self.training_success]
+
             summary = self.session.run(summary_merge, feed_dict=self.training_data)
             self.summary_writer.add_summary(summary, epoch + start_epoch)
 
             epoch_time = time.time() - epoch_time
 
             # Cycle over, doing some running
-            exit_reason = 'max_epochs reached'  # Cheeky string that says why we finished training
+            self.exit_reason = 'max_epochs reached'  # Cheeky string that says why we finished training
             have_done_more_than_one_step = False  # Stop stupid predictions being made too early
             while epoch < max_epochs:
                 step_start_time = time.time()
@@ -282,13 +295,17 @@ class MixtureDensityNetwork:
                     self.loss[epoch + start_epoch] = self.session.run(self.loss_total,
                                                                       feed_dict=self.training_data)
                     if np.isnan(self.loss[epoch + start_epoch]):
-                        exit_reason = 'nan loss encountered'
+                        self.exit_reason = 'nan loss encountered'
+                        self.training_success = False
                         break
 
                     # Write out the summaries
                     summary = self.session.run(summary_merge, feed_dict=self.training_data)
                     self.summary_writer.add_summary(summary, epoch + start_epoch)
                     epochs_in_this_report += 1
+
+                    # Force garbage collection
+                    gc.collect()
 
                 # Calculate the new epoch time and ETA
                 now_time = time.time()
@@ -306,22 +323,28 @@ class MixtureDensityNetwork:
 
                 # Decide if we need to end
                 if now_time > cutoff_time:
-                    exit_reason = 'time limit reached'
+                    self.exit_reason = 'time limit reached'
+                    self.training_success = True
                     break
-                if exit_reason is 'nan loss encountered':
+                if self.exit_reason is 'nan loss encountered':
+                    self.training_success = False
                     break
 
                 have_done_more_than_one_step = True
                 step_end_time = time.time()
                 epoch_time = (step_end_time - step_start_time) / epochs_per_report
 
+        # Make sure to update the training success bool if it did indeed work
+        if self.exit_reason == 'max_epochs reached':
+            self.training_success = True
+
         # It's all over! =( (we let the user know, unsurprisingly)
         print('=== ENDING TRAINING ======')
-        print('reason      = {}'.format(exit_reason))
+        print('reason      = {}'.format(self.exit_reason))
         print('epochs done = {}'.format(epoch))
         print('==========================')
 
-        return [exit_reason, epoch]
+        return [self.exit_reason, epoch, self.training_success]
 
     def save_graph(self, location: str):
         """Saves a complete copy of the current network to a specified location.
@@ -404,6 +427,11 @@ class MixtureDensityNetwork:
             A list of all MAP values for objects in validation_data. Fails to calculate MAP values will return a np.nan.
 
         """
+        # Only do this next step if prior training actually worked!
+        if self.training_success is False:
+            print('Prior training failed! Unable to calculate MAP values. Exiting calculate_MAP.')
+            return 0
+
         print('Attempting to calculate the MAP values of all distributions...')
 
         # Define a function to minimise, multiplied by -1 to make sure we're minimising not maximising
@@ -467,7 +495,7 @@ class MixtureDensityNetwork:
         return map_values
 
     def plot_pdf(self, validation_data: dict, values_to_highlight, data_range=None, resolution: int=100,
-                 map_values=None, figure_directory: Optional[str]=None):
+                 map_values=None, true_values=None, figure_directory: Optional[str]=None):
         """Plots the mixture pdf of a given set of parameters.
 
         Args:
@@ -480,6 +508,11 @@ class MixtureDensityNetwork:
         Returns:
             pretty graphs
         """
+        # Only do this next step if prior training actually worked!
+        if self.training_success is False:
+            print('Prior training failed! Unable to plot PDFs. Exiting calculate_MAP.')
+            return 0
+
         # See if the user specified their own data range
         if data_range is None:
             data_range = self.y_data_range
@@ -513,17 +546,22 @@ class MixtureDensityNetwork:
             # Make some cool plots
             plt.figure()
 
+            # Plot the total mixture
+            plt.plot(actual_y_range, total_pdf, 'k-', lw=2, label='Total pdf', alpha=1)
+
             # Plot each mixture individually
             for mixture_number, a_color in enumerate(colors):
-                plt.plot(actual_y_range, mixture_pdfs[mixture_number, :], '-', lw=1, color=a_color,
+                plt.plot(actual_y_range, mixture_pdfs[mixture_number, :], '--', lw=1, color=a_color,
                          label='Mixture ' + str(mixture_number))
-
-            # Plot the total mixture
-            plt.plot(actual_y_range, total_pdf, 'k--', lw=2, label='Total pdf', alpha=0.5)
 
             # If specified, plot the MAP value
             if map_values is not None:
                 plt.plot([map_values[an_object], map_values[an_object]], [total_pdf.min(), total_pdf.max()],
+                         'r-', label='MAP value')
+
+            # If specified, plot the MAP value
+            if true_values is not None:
+                plt.plot([true_values[an_object], true_values[an_object]], [total_pdf.min(), total_pdf.max()],
                          'r-', label='MAP value')
 
             plt.legend(edgecolor='k', facecolor='w', fancybox=True)
@@ -533,7 +571,7 @@ class MixtureDensityNetwork:
             if figure_directory is not None:
                 plt.savefig(figure_directory + '_pdf_' + str(an_object) + '.png')
 
-            plt.show()
+            # plt.show() todo killed
 
 
 # Unit tests: implements the class on the toy_mdn_emily example data, using data from the following blog post:

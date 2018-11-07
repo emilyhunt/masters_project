@@ -33,9 +33,10 @@ def phot_vs_spec(spectroscopic_z, photometric_z, save_name='phot_vs_spec.png', n
     plt.ylabel(r'$z_{phot}$')
 
     # Output time
-    plt.savefig(save_name)
     plt.title(plt_title)
-    plt.show()
+    plt.savefig(save_name)
+
+    # plt.show() todo changed
     return 0
 
 

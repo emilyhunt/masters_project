@@ -39,73 +39,97 @@ for a_signal_noise in signal_noise_levels:
 
 # Initialise twitter
 twit = twitter.TweetWriter()
-twit.write(twitter.initial_text('network hyperparameter tuning'), )
+twit.write(twitter.initial_text('to tune network hyperparameters [running continues on py-noether.]'), reply_to=-1)
 
 # Cycle over a number of different network configurations
 rates = [1e-3]#, 5e-3, 5e-4, 1e-4, 1e-3]
 sizes = [[20],
          [20, 10],
          [20, 20],
-         [20, 20, 10]]
+         [20, 20, 10],
+         [20, 20, 20],
+         [30],
+         [40]]
 regs = [None, 'L1', 'L2']
+mixtures = [1, 3, 5]
+
 run_names = []
 
 network = 0
 
-for a_size in sizes:
-    for a_reg in regs:
+i_sizes = 2
+i_regs = 2
+i_mixtures = 1
 
-        print('==========================================')
-        print(a_size)
-        # Setup our network
-        del network  # Necessary to stop memory leaks, as re-assigning to network does NOT delete the old one properly!
-        network = mdn.MixtureDensityNetwork(loss_funcs.BetaDistribution(), './logs/adam_diagnostics/' + str(a_size) + '-layers-tanh-L2', regularization='L2',
-                                            x_scaling='robust', y_scaling='min_max', x_features=10, y_features=1,
-                                            layer_sizes=a_size, mixture_components=5, learning_rate=1e-3)
-        network.set_training_data(x_train, y_train)
+while i_sizes < len(sizes):
+    while i_regs < len(regs):
+        while i_mixtures < len(mixtures):
+            a_size = sizes[i_sizes]
+            a_reg = regs[i_regs]
+            a_mix = mixtures[i_mixtures]
 
-        # Run this thing!
-        exit_code, epochs = network.train(max_epochs=2000, max_runtime=1.0)
+            print('==========================================')
+            # Setup our network
+            del network  # Necessary to stop memory leaks, as re-assigning to network doesn't delete old one properly!
+            network = mdn.MixtureDensityNetwork(loss_funcs.BetaDistribution(), './logs/blog_hyperparam_fit/'
+                                                + str(a_size) + '_' + str(a_mix) + '_' + str(a_reg),
+                                                regularization=a_reg,
+                                                x_scaling='robust',
+                                                y_scaling='min_max',
+                                                x_features=10,
+                                                y_features=1,
+                                                layer_sizes=a_size,
+                                                mixture_components=a_mix,
+                                                learning_rate=1e-3)
 
-        # network.plot_loss_function_evolution()
+            network.set_training_data(x_train, y_train)
 
-        config_name = '_' + str(a_size) + '_' + str(a_reg) + '_'
+            # Run this thing!
+            exit_code, epochs, training_success = network.train(max_epochs=2000, max_runtime=1.0)
 
-        # Calculate how well everything worked!
-        validation_results = {}
-        validation_redshifts = {}
-        points_to_use = 2000
-        for a_signal_noise in signal_noise_levels:
-            print(a_signal_noise)
-            network.set_validation_data(x_validate[a_signal_noise][:points_to_use],
-                                        y_validate[:points_to_use].reshape(points_to_use, 1))
-            validation_results[a_signal_noise] = network.validate()
-            validation_redshifts[a_signal_noise] = network.calculate_map(validation_results[a_signal_noise],
-                                                                         reporting_interval=int(points_to_use / 5))
-            network.plot_pdf(validation_results, [10, 100, 200], map_values=validation_redshifts,
-                             figure_directory='./plots/18-11-5/' + config_name + a_signal_noise)
+            # network.plot_loss_function_evolution()
 
-        # Plot all of said results!
-        colors = ['r', 'c', 'm']
-        for a_signal_noise, a_color in zip(signal_noise_levels, colors):
-            z_plot.phot_vs_spec(y_validate[:points_to_use], validation_redshifts[a_signal_noise],
-                                save_name='./plots/18-11-5/zinf_ztrue' + config_name + a_signal_noise + '.png',
-                                plt_title='Blog data: true vs inferred redshift at ' + a_signal_noise,
-                                point_alpha=0.2, point_color=a_color, limits=[0, 3.0],
-                                nmad=z_util.calculate_nmad(y_validate[:points_to_use],
-                                                           validation_redshifts[a_signal_noise]))
+            config_name = str(a_size) + '-' + str(a_mix) + '_' + str(a_reg) + '_'
 
-        twit.write(twitter.update_text('\nlayer config=' + str(a_size)
-                                       + '\nreg=' + str(a_reg)
-                                       + '\nepochs=' + str(epochs)
-                                       + '\nexit code=' + str(exit_code)), reply_to=-1)
+            # Calculate how well everything worked, but only if the training was successful
+            if training_success:
+                validation_results = {}
+                validation_redshifts = {}
+                points_to_use = 2000
+                for a_signal_noise in signal_noise_levels:
+                    print(a_signal_noise)
+                    network.set_validation_data(x_validate[a_signal_noise][:points_to_use],
+                                                y_validate[:points_to_use].reshape(points_to_use, 1))
+                    validation_results[a_signal_noise] = network.validate()
+                    validation_redshifts[a_signal_noise] = network.calculate_map(validation_results[a_signal_noise],
+                                                                                 reporting_interval=int(points_to_use / 5))
+                    network.plot_pdf(validation_results[a_signal_noise], [10, 100, 200],
+                                     map_values=validation_redshifts[a_signal_noise],
+                                     true_values=y_validate[:points_to_use].flatten(),
+                                     figure_directory='./plots/18-11-05/' + config_name + a_signal_noise)
 
+                # Plot all of said results!
+                colors = ['r', 'c', 'm']
+                for a_signal_noise, a_color in zip(signal_noise_levels, colors):
+                    z_plot.phot_vs_spec(y_validate[:points_to_use].flatten(), validation_redshifts[a_signal_noise],
+                                        save_name='./plots/18-11-05/zinf_ztrue_' + config_name + a_signal_noise + '.png',
+                                        plt_title='Blog data: true vs inferred redshift at ' + a_signal_noise,
+                                        point_alpha=0.2, point_color=a_color, limits=[0, 3.0],
+                                        nmad=z_util.calculate_nmad(y_validate[:points_to_use].flatten(),
+                                                                   validation_redshifts[a_signal_noise]))
 
-
-
+            twit.write(twitter.update_text('\nlayer config=' + str(a_size)
+                                           + '\nmixtures=' + str(a_mix)
+                                           + '\nreg=' + str(a_reg)
+                                           + '\nepochs=' + str(epochs)
+                                           + '\nexit code=' + str(exit_code)), reply_to=-1)
+            i_mixtures += 1
+        i_mixtures = 0
+        i_regs += 1
+    i_regs = 0
+    i_sizes += 1
 
 twit.write(twitter.annoy_me('Everything is done! YAY'))
-
 
 
 """

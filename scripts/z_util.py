@@ -45,6 +45,10 @@ def read_save(target, columns_to_keep=None, new_column_names=None):
 
 def calculate_nmad(spectroscopic_z, photometric_z):
     """Returns the normalised median absolute deviation between photometric and spectroscopic redshifts"""
+    # Flatten arrays to avoid issues with them being the wrong size
+    spectroscopic_z = spectroscopic_z.flatten()
+    photometric_z = photometric_z.flatten()
+
     # Work out where there are valid spec and phot values
     valid = np.where(np.logical_and(spectroscopic_z > 0, photometric_z > 0))[0]
 
