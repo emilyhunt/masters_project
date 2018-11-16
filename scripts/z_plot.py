@@ -30,8 +30,8 @@ def phot_vs_spec(spectroscopic_z, photometric_z, nmad=None, point_alpha=0.2, poi
 
     # Make it pwetty
     if limits is not None:
-        ax_left.set_xlim([limits[0], limits[1]])
-        ax_left.set_ylim([limits[0], limits[1]])
+        ax_left.set_xlim(limits[0], limits[1])
+        ax_left.set_ylim(limits[0], limits[1])
     ax_left.set_xlabel(r'$z_{spec}$')
     ax_left.set_ylabel(r'$z_{phot}$')
 

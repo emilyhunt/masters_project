@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import gc
+import pandas as pd
+import pymc3
 from matplotlib import cm
 from scripts import loss_funcs
 from scripts.twitter import calc_local_time
@@ -304,7 +306,7 @@ class MixtureDensityNetwork:
                     self.summary_writer.add_summary(summary, epoch + start_epoch)
                     epochs_in_this_report += 1
 
-                    # Force garbage collection
+                    # Force garbage collection (sometimes helps to prevent memory issues... sometimes.)
                     gc.collect()
 
                 # Calculate the new epoch time and ETA
@@ -416,21 +418,27 @@ class MixtureDensityNetwork:
 
         plt.show()
 
-    def calculate_map(self, validation_data, reporting_interval: int=100, resolution: int=20):
-        """Calculates the MAP (maximum a posteriori) of a given set of mixture distributions.
+    def calculate_validation_stats(self, validation_data, reporting_interval: int=100, start_resolution: int=100,
+                                   uncertainty_integration_resolution: int=2000, uncertainty_sigma_level: float=1.):
+        """Calculates the MAP (maximum a posteriori), uncertainty and modality of a given set of mixture distributions.
+
         Args:
             validation_data (dict): the data from a .validate call.
             reporting_interval (int): how often to let the user know which objects we're working on. Default: 100.
-            resolution (int): number of points to test against when finding the initial guess.
+            start_resolution (int): number of points to test against when finding the initial guess.
+            uncertainty_integration_resolution (int): number of random variables to draw when integrating the pdfs to
+                find the uncertainty levels.
+            uncertainty_sigma_level (float): todo: implement this! calculate with erf(x / sqrt(2))
 
         Returns:
-            A list of all MAP values for objects in validation_data. Fails to calculate MAP values will return a np.nan.
+            A pandas.DataFrame() containing map values, limits and a pdf modality count, addressed with keys 'map',
+            'lower', 'upper' and 'modality'.
 
         """
         # Only do this next step if prior training actually worked!
         if self.training_success is False:
             print('Prior training failed! Unable to calculate MAP values. Exiting calculate_MAP.')
-            return 0
+            return pd.DataFrame()
 
         print('Attempting to calculate the MAP values of all distributions...')
 
@@ -438,15 +446,18 @@ class MixtureDensityNetwork:
         def function_to_minimise(x_data, my_object_dictionary, my_loss_function):
             return -1 * my_loss_function.pdf_single_point(x_data, my_object_dictionary)
 
-        # Create a blank array of np.nan values to populate with hopefully successful minimisations
+        # Create blank arrays of np.nan values to populate with hopefully successful minimisations
         n_objects = validation_data[self.graph_output_names[0]].shape[0]
         map_values = np.empty(n_objects)
         map_values[:] = np.nan
+        upper_limits = map_values.copy()
+        lower_limits = map_values.copy()
+        modality = np.zeros(n_objects, dtype=int)
 
         # A bit of setup for our initial guess of MAP values
-        guess_x_range = np.linspace(self.y_data_range[0], self.y_data_range[1], num=resolution)
+        guess_x_range = np.linspace(self.y_data_range[0], self.y_data_range[1], num=start_resolution)
 
-        # Loop over each object and work out the MAP values for each
+        # Loop over each object and work out the stats for each
         i = 0
         successes = 0
         mean_number_of_iterations = 0.0
@@ -457,9 +468,31 @@ class MixtureDensityNetwork:
             for a_name in self.graph_output_names:
                 object_dictionary[a_name] = validation_data[a_name][i]
 
-            # Make a sensible starting guess
-            starting_guess = guess_x_range[np.argmax(self.loss_function.pdf_multiple_points(guess_x_range,
-                object_dictionary, sum_mixtures=True))]
+            # Make a sensible starting guess and look at the y values in parameter space
+            guess_y_range = self.loss_function.pdf_multiple_points(guess_x_range, object_dictionary, sum_mixtures=True)
+            starting_guess = guess_x_range[np.argmax(guess_y_range)]
+
+            # Estimate the modality of the distribution by looking for sign changes, using a method from:
+            # https://stackoverflow.com/questions/2652368/how-to-detect-a-sign-change-for-elements-in-a-numpy-array
+            # First, we find the difference between consecutive values and hence estimate the gradient
+            guess_difference = guess_y_range[1:] - guess_y_range[0:-1]
+
+            # Then, we find the sign of the gradient (np.sign returns +1 or -1) and then look for signchanges, where
+            # consecutive guess_sign values being added or subtracted make +2 or -2 (not zero.) We also only care about
+            # sign changes that occur for points that have a y value at least 1% of the MAP (as we don't care about
+            # tiny modes or accidentally detecting the flat tails either side of the distribution.)
+            guess_sign = np.sign(guess_difference)
+            guess_signchange = np.logical_and(guess_sign[1:] - guess_sign[0:-1] != 0,
+                                              guess_y_range[1:-1] > guess_y_range.max() * 0.01)
+
+            # Count the number of turning points in the pdf
+            turning_points = np.count_nonzero(guess_signchange)
+
+            # Convert this number of turning points into a measure of modality with some fancyness
+            if turning_points is not 0:
+                modality[i] = int(np.ceil(0.5 + turning_points / 2))
+            else:
+                modality[i] = 0
 
             # Attempt to minimise and find the MAP value
             result = scipy_minimize(function_to_minimise, np.array([starting_guess]),
@@ -471,9 +504,29 @@ class MixtureDensityNetwork:
                 map_values[i] = result.x
                 successes += 1
                 mean_number_of_iterations += result.nit
+
+                # Now, use random deviates to find the uncertainty on the MAP
+                random_deviates = self.loss_function.draw_random_variables(uncertainty_integration_resolution,
+                                                                           object_dictionary)
+
+                # pymc3 docs for the following functions: https://docs.pymc.io/api/stats.html
+                # Use the highest probability density region if the pdf is unimodal
+                if modality[i] == 1:
+                    limits = pymc3.stats.hpd(random_deviates, alpha=0.3173)  # Corresponds to 1 sigma of error.
+                    lower_limits[i] = limits[0]
+                    upper_limits[i] = limits[1]
+
+                # If not, then we find quantiles corresponding to +- 1 sigma. This isn't theoretically as
+                # good, as the IQR is not guaranteed to contain the MAP value we found earlier.
+                else:
+                    limits = pymc3.stats.quantiles(random_deviates, qlist=[0.15865, 0.84135])  # Again, 1 sigma error.
+                    lower_limits[i] = limits[0.15865]
+                    upper_limits[i] = limits[0.84135]
+
+                print('object {}, limits {}'.format(i, limits))
+
             else:
                 print('Failed to find MAP for object {}!'.format(i))
-                map_values[i] = np.nan
 
             # Keep the user updated on what interval of objects we're working on (prevents panic if this takes ages)
             if i % reporting_interval == 0:
@@ -486,13 +539,21 @@ class MixtureDensityNetwork:
             finite_map_values = np.isfinite(map_values)
             map_values[finite_map_values] = self.y_scaler.inverse_transform(map_values[finite_map_values]
                                                                             .reshape(-1, 1)).flatten()
+            finite_lower_limits = np.isfinite(lower_limits)
+            lower_limits[finite_lower_limits] = self.y_scaler.inverse_transform(lower_limits[finite_lower_limits]
+                                                                                .reshape(-1, 1)).flatten()
+            finite_upper_limits = np.isfinite(upper_limits)
+            upper_limits[finite_upper_limits] = self.y_scaler.inverse_transform(upper_limits[finite_upper_limits]
+                                                                                .reshape(-1, 1)).flatten()
 
         # Calculate the mean number of iterations of the minimizer
         mean_number_of_iterations /= float(successes)
 
         print('Found MAP values for {:.2f}% of objects.'.format(100 * successes / float(n_objects)))
-        print('Mean number of iterations = {}'.format(mean_number_of_iterations))
-        return map_values
+        print('Mean number of MAP minimisation iterations = {}'.format(mean_number_of_iterations))
+
+        return pd.DataFrame({'map': map_values, 'lower': lower_limits,
+                             'upper': upper_limits, 'modality': modality})
 
     def plot_pdf(self, validation_data: dict, values_to_highlight, data_range=None, resolution: int=100,
                  map_values=None, true_values=None, figure_directory: Optional[str]=None, show_fig: bool=False):
@@ -578,7 +639,6 @@ class MixtureDensityNetwork:
                 # todo make this stuff work
 
 
-
 # Unit tests: implements the class on the toy_mdn_emily example data, using data from the following blog post:
 # http://blog.otoro.net/2015/11/24/mixture-density-networks-with-tensorflow/
 if __name__ == '__main__':
@@ -586,9 +646,9 @@ if __name__ == '__main__':
 
     # Create some data to play wit1h
     def build_toy_dataset(dataset_size):
-        y_data = np.random.uniform(-10.5, 10.5, dataset_size)
+        y_data = np.random.uniform(5, 10.5, dataset_size)  # DEFAULT: -10.5, +10.5
         r_data = np.random.normal(size=dataset_size)  # random noise
-        x_data = np.sin(0.75 * y_data) * 7.0 + y_data * 0.5 + r_data * 1.0
+        x_data = np.sin(0.75 * y_data) * 7.0 + y_data * 0.5 + r_data * 0.1
         x_data = x_data.reshape((dataset_size, 1))
         y_data = y_data.reshape((dataset_size, 1))
         return train_test_split(x_data, y_data, random_state=42)
@@ -609,7 +669,7 @@ if __name__ == '__main__':
                                     './logs/mdn_tests_tensorboard/' + str(time.strftime('%H-%M-%S', time.localtime(time.time()))),
                                     regularization=None,
                                     x_features=1, y_features=1, layer_sizes=[20, 20],
-                                    mixture_components=15, learning_rate=1e-2,
+                                    mixture_components=15, learning_rate=5e-3,
                                     y_scaling=None, x_scaling=None)
 
     # Set the data
@@ -617,7 +677,7 @@ if __name__ == '__main__':
     network.set_validation_data(x_test, y_test)
 
     # Train the network for max_epochs epochs
-    network.train(max_epochs=500)
+    network.train(max_epochs=250)
 
     # Plot the loss function
     network.plot_loss_function_evolution()
@@ -626,10 +686,10 @@ if __name__ == '__main__':
     validation_results = network.validate()
 
     # Calculate some MAP values
-    map_values = network.calculate_map(validation_results, reporting_interval=500)
+    validation_stats = network.calculate_validation_stats(validation_results, reporting_interval=500)
 
     # Plot some pdfs
-    network.plot_pdf(validation_results, [0, 100, 200], map_values=map_values, show_fig=True)
+    network.plot_pdf(validation_results, [0, 100, 200], map_values=validation_stats['map'], show_fig=True)
 
 
     # Some code to plot a validation plot. Firstly, we have to generate points to pull from:
@@ -669,4 +729,3 @@ if __name__ == '__main__':
     plt.legend(fancybox=True)
     plt.ylim(-25, 25)
     plt.show()
-

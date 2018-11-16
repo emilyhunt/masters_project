@@ -105,8 +105,8 @@ for a_size in sizes:
                 network.set_validation_data(x_validate[a_signal_noise][:points_to_use],
                                             y_validate[:points_to_use].reshape(points_to_use, 1))
                 validation_results[a_signal_noise] = network.validate()
-                validation_redshifts[a_signal_noise] = network.calculate_map(validation_results[a_signal_noise],
-                                                                             reporting_interval=int(points_to_use / 5))
+                validation_redshifts[a_signal_noise] = network.calculate_validation_stats(validation_results[a_signal_noise],
+                                                                                          reporting_interval=int(points_to_use / 5))  # todo: this returns different stuff now after being changed!
                 network.plot_pdf(validation_results[a_signal_noise], [10, 100, 200],
                                  map_values=validation_redshifts[a_signal_noise],
                                  true_values=y_validate[:points_to_use].flatten(),
@@ -145,7 +145,7 @@ for a_signal_noise in signal_noise_levels:
     network.set_validation_data(x_validate[a_signal_noise][:points_to_use],
                                 y_validate[:points_to_use].reshape(points_to_use, 1))
     validation_results[a_signal_noise] = network.validate()
-    validation_redshifts[a_signal_noise] = network.calculate_map(validation_results[a_signal_noise],
+    validation_redshifts[a_signal_noise] = network.calculate_validation_stats(validation_results[a_signal_noise],
                                                                  reporting_interval=int(points_to_use / 5))
 
 # Plot all of said results!

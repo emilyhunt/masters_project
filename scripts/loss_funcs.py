@@ -114,23 +114,44 @@ class NormalDistribution:
                       * coefficients['weights'])
 
     @staticmethod
-    def draw_random_variables(number: int, coefficients: dict, absolute_min_value=0.0, absolute_max_value=10.0):
-        """Draws random variables from pdf_multiple_points for numerical integration uses.
+    def draw_random_variables(n_samples: int, coefficients: dict):
+        """Draws random variables from pdf_multiple_points for numerical integration uses. May only be used on a single
+        mixture at a time (so make sure elements of 'coefficients' are 1D.) Otherwise, it will fail badly, and quietly
+        too (no error checking is added to make sure it stays fast.)
+
         Args:
-            number (int): how many samples to draw.
+            n_samples (int): how many samples to draw.
             coefficients (dict): validation dictionary specifying the details of the mixture pdf.
-            absolute_min_value (float): minimum possible value the pdf can take.
-            absolute_max_value (float): maximum possible value the pdf can take.
 
         Returns:
             a np.array containing samples drawn from the mixture.
         """
         # Define a dictionary of samples and work out how many we'll want to draw from each mixture
-        random_variables = np.empty(number)
+        random_variables = np.empty(n_samples)
+        number_weights = np.around(coefficients['weights'] * n_samples).astype(int)
 
+        # Add 0 to the start of number_weights so that when writing random variables we start at the beginning of
+        # the array
+        number_weights = np.append([0], number_weights)
 
+        # If number_weights sums to more than the number of points specified (due to a rounding error) then subtract the
+        # rounding error (not normally more than just 1) from the largest weights.
+        difference = n_samples - np.sum(number_weights)
 
+        if difference is not 0:
+            number_weights[np.argmax(number_weights)] += difference
 
+        # Make a cumulative sum so that we've got more by way of
+        number_indices = np.cumsum(number_weights)
+
+        # Draw some random variables for fun
+        i = 1
+        for a_mean, a_std_d in zip(coefficients['means'], coefficients['std_deviations']):
+            random_variables[number_indices[i-1]:number_indices[i]] = scipy_normal.rvs(loc=a_mean, scale=a_std_d,
+                                                                                       size=number_weights[i])
+            i += 1
+
+        return random_variables
 
 
 class BetaDistribution:
@@ -241,3 +262,43 @@ class BetaDistribution:
             A float of the pdf evaluated at a single point.
         """
         return np.sum(scipy_beta.pdf(x_point, coefficients['alpha'], coefficients['beta']) * coefficients['weights'])
+
+    @staticmethod
+    def draw_random_variables(n_samples: int, coefficients: dict):
+        """Draws random variables from pdf_multiple_points for numerical integration uses. May only be used on a single
+        mixture at a time (so make sure elements of 'coefficients' are 1D.) Otherwise, it will fail badly, and quietly
+        too (no error checking is added to make sure it stays fast.)
+
+        Args:
+            n_samples (int): how many samples to draw.
+            coefficients (dict): validation dictionary specifying the details of the mixture pdf.
+
+        Returns:
+            a np.array containing samples drawn from the mixture.
+        """
+        # Define a dictionary of samples and work out how many we'll want to draw from each mixture
+        random_variables = np.empty(n_samples)
+        number_weights = np.around(coefficients['weights'] * n_samples).astype(int)
+
+        # Add 0 to the start of number_weights so that when writing random variables we start at the beginning of
+        # the array
+        number_weights = np.append([0], number_weights)
+
+        # If number_weights sums to more than the number of points specified (due to a rounding error) then subtract the
+        # rounding error (not normally more than just 1) from the largest weights.
+        difference = n_samples - np.sum(number_weights)
+
+        if difference is not 0:
+            number_weights[np.argmax(number_weights)] += difference
+
+        # Make a cumulative sum so that we've got more by way of
+        number_indices = np.cumsum(number_weights)
+
+        # Draw some random variables for fun
+        i = 1
+        for a_alpha, a_beta in zip(coefficients['alpha'], coefficients['beta']):
+            random_variables[number_indices[i - 1]:number_indices[i]] = scipy_beta.rvs(a_alpha, a_beta,
+                                                                                       size=number_weights[i])
+            i += 1
+
+        return random_variables
