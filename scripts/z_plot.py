@@ -1,42 +1,45 @@
-"""Various plotting tools for redshift analysis, to be used extensively with z_util.py."""
+"""Various plotting tools for redshift analysis, to be used extensively with util.py."""
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import norm
-from scipy.optimize import curve_fit
-from matplotlib import rc
-from scripts import z_util
+
+import scripts.galaxy_pairs
+from scripts import util
 
 # Make TeX labels work on plots
 #rc('font', **{'family': 'serif', 'serif': ['Palatino']})
 #rc('text', usetex=True)
+from scripts.util import single_gaussian_to_fit, double_gaussian_to_fit, fit_gaussians
 
 
-def phot_vs_spec(spectroscopic_z, photometric_z, save_name='phot_vs_spec.png', nmad=None,
-                 point_alpha=0.2, point_color='r', plt_title=None, limits=None):
-    """Plots photometric redshift against spectroscopic for analysis."""
+def phot_vs_spec(spectroscopic_z, photometric_z, nmad=None, point_alpha=0.2, point_color='r', plt_title=None,
+                 limits=None, save_name='phot_vs_spec.png', show_fig=False):
+    """Plots photometric redshift against spectroscopic for analysis."""  # todo this fn needs updating
     # Plot data points and a y=x bisector
-    plt.figure()
-    plt.plot(spectroscopic_z, photometric_z, '.', color=point_color, ms=2, alpha=point_alpha)
-    plt.plot([-1, 10], [-1, 10], 'k--', lw=1)
+    fig = plt.figure()
+    ax_left = fig.add_subplot(1, 2, 1)  # n_rows, n_cols, axis_number
+    ax_right = fig.add_subplot(1, 2, 2)
+
+    ax_left.plot(spectroscopic_z, photometric_z, '.', color=point_color, ms=2, alpha=point_alpha)
+    ax_left.plot([-1, 10], [-1, 10], 'k--', lw=1)
 
     # Add the NMAD to the plot if it has been specified by the user
     if nmad is not None:
-        plt.text(1, 6.5, 'NMAD = {:.4f}'.format(nmad), ha='center', va='center',
+        ax_left.text(1, 6.5, 'NMAD = {:.4f}'.format(nmad), ha='center', va='center',
                  bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
 
     # Make it pwetty
     if limits is not None:
-        plt.xlim([limits[0], limits[1]])
-        plt.ylim([limits[0], limits[1]])
-    plt.xlabel(r'$z_{spec}$')
-    plt.ylabel(r'$z_{phot}$')
+        ax_left.set_xlim([limits[0], limits[1]])
+        ax_left.set_ylim([limits[0], limits[1]])
+    ax_left.set_xlabel(r'$z_{spec}$')
+    ax_left.set_ylabel(r'$z_{phot}$')
 
     # Output time
-    plt.title(plt_title)
+    ax_left.set_title(plt_title)
     plt.savefig(save_name)
 
-    # plt.show() todo changed
+    # plt.show()
     return 0
 
 
@@ -89,61 +92,6 @@ def mean_redshifts_on_sky(ra, dec, my_redshifts, n_levels=50, grid_resolution=30
     plt.colorbar()
     plt.show()
     return 0
-
-
-def single_gaussian_to_fit(x, standard_deviation, A):
-    """Allows a Gaussian to be accessed to fit a curve to."""
-    return A * norm.pdf(x, loc=0, scale=standard_deviation)
-
-
-def double_gaussian_to_fit(x, standard_deviation_1, standard_deviation_2, A, r):
-    """Allows a double Gaussian convolved with another Gaussian to be accessed to fit a curve to."""
-    sqrt_2 = np.sqrt(2)
-    term_1 = A * norm.pdf(x, loc=0, scale=sqrt_2*standard_deviation_1)
-    term_2 = A * 2 * r * norm.pdf(x, loc=0, scale=np.sqrt(standard_deviation_1**2 + standard_deviation_2**2))
-    term_3 = A * r**2 * norm.pdf(x, loc=0, scale=sqrt_2 * standard_deviation_2)
-    return term_1 + term_2 + term_3
-
-
-def fit_gaussians(x_range, y_range):
-    """Function that handles fitting Gaussians to our final data."""
-    # Make a blank dictionary for keeping our params in
-    my_params = {}
-
-    # Fit the first Gaussian
-    try:
-        params_optimized, params_covariance = curve_fit(single_gaussian_to_fit, x_range, y_range,
-                                                        p0=[1, 1],
-                                                        bounds=([0.01, 0],
-                                                                [np.inf, np.inf]),
-                                                        verbose=0, method='dogbox')
-        my_params['s_s'] = params_optimized[0]
-        my_params['s_A'] = params_optimized[1]
-    except RuntimeError:
-        print('Unable to fit single Gaussian, likely due to maximum number of function evals being exceeded!')
-        my_params['s_s'] = 1
-        my_params['s_A'] = 0
-
-
-    # Fit the double Gaussian
-    try:
-        params_optimized, params_covariance = curve_fit(double_gaussian_to_fit, x_range, y_range,
-                                                        p0=[1, 2, 1, 0.5],
-                                                        bounds=([0.01, 0.01, 0, 0],
-                                                                [np.inf, np.inf, np.inf, np.inf]),
-                                                        verbose=0, method='dogbox')
-        my_params['d_s1'] = params_optimized[0]
-        my_params['d_s2'] = params_optimized[1]
-        my_params['d_A'] = params_optimized[2]
-        my_params['d_r'] = params_optimized[3]
-    except RuntimeError:
-        print('Unable to fit double Gaussian, likely due to maximum number of function evals being exceeded!')
-        my_params['d_s1'] = 1
-        my_params['d_s2'] = 1
-        my_params['d_A'] = 0
-        my_params['d_r'] = 0.5
-
-    return my_params
 
 
 def pair_redshift_deviation(my_redshifts, my_all_galaxy_pairs, my_random_galaxy_pairs, size_of_random_catalogue=1.):
@@ -233,15 +181,15 @@ if __name__ == '__main__':
 
     # Read in the .save files
     print('Reading in default save files')
-    redshifts = z_util.read_save(data_dir + files_to_read[0])
-    coords = z_util.read_save(data_dir + files_to_read[1])
+    redshifts = util.read_save(data_dir + files_to_read[0])
+    coords = util.read_save(data_dir + files_to_read[1])
 
     # Join the co-ordinates to the redshifts DataFrame
     redshifts['gs4_ra'] = coords['gs4_ra']
     redshifts['gs4_dec'] = coords['gs4_dec']
 
     # Calculate the NMAD
-    my_nmad = z_util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
+    my_nmad = util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
 
     # Make a plot of the photometric redshifts against spectroscopic
     phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], nmad=my_nmad)
@@ -254,21 +202,21 @@ if __name__ == '__main__':
 
     # Find all galaxy pairs
     random_catalogue_repeats = 1
-    all_galaxy_pairs, random_galaxy_pairs = z_util.store_pairs_on_sky(redshifts['gs4_ra'][:],
+    all_galaxy_pairs, random_galaxy_pairs = scripts.galaxy_pairs.store_pairs_on_sky(redshifts['gs4_ra'][:],
                                                                       redshifts['gs4_dec'][:],
-                                                                      max_separation=15., min_separation=1.5,
-                                                                      max_move=26, min_move=25,
-                                                                      size_of_random_catalogue=random_catalogue_repeats)
+                                                                                    max_separation=15., min_separation=1.5,
+                                                                                    max_move=26, min_move=25,
+                                                                                    size_of_random_catalogue=random_catalogue_repeats)
 
     # Try reading in the pairs again to check the storing worked
     max_z = 100
     min_z = 0
-    all_galaxy_pairs_read_in = z_util.read_pairs('../data/all_pairs.csv', redshifts['gs4_zphot'],
-                                                 min_redshift=min_z, max_redshift=max_z)
+    all_galaxy_pairs_read_in = scripts.galaxy_pairs.read_pairs('../data/all_pairs.csv', redshifts['gs4_zphot'],
+                                                               min_redshift=min_z, max_redshift=max_z)
 
-    random_galaxy_pairs_read_in = z_util.read_pairs('../data/random_pairs.csv', redshifts['gs4_zphot'],
-                                                    min_redshift=min_z, max_redshift=max_z,
-                                                    size_of_random_catalogue=random_catalogue_repeats)
+    random_galaxy_pairs_read_in = scripts.galaxy_pairs.read_pairs('../data/random_pairs.csv', redshifts['gs4_zphot'],
+                                                                  min_redshift=min_z, max_redshift=max_z,
+                                                                  size_of_random_catalogue=random_catalogue_repeats)
 
     # Make a plot of Npairs against deltaZ
     pair_redshift_deviation(redshifts['gs4_zphot'], all_galaxy_pairs_read_in, random_galaxy_pairs_read_in,

@@ -71,15 +71,15 @@ class NormalDistribution:
         """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object. Fastest at
         evaluating lots of x data points: for instance, for initial minimum finding or for plotting a pdf.
 
-                Args:
-                    x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
-                    coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
-                                  of those values for the given object.
-                    sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
-                                  a big array of all the mixture components individually.
+            Args:
+                x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
+                coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                              of those values for the given object.
+                sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
+                              a big array of all the mixture components individually.
 
-                Returns:
-                    A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
+            Returns:
+                A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
         """
         # Typecast x_data as a 1D numpy array and work out how many mixtures there are
         x_data = np.array([x_data]).flatten()
@@ -112,6 +112,25 @@ class NormalDistribution:
         """
         return np.sum(scipy_normal.pdf(x_point, loc=coefficients['means'], scale=coefficients['std_deviations'])
                       * coefficients['weights'])
+
+    @staticmethod
+    def draw_random_variables(number: int, coefficients: dict, absolute_min_value=0.0, absolute_max_value=10.0):
+        """Draws random variables from pdf_multiple_points for numerical integration uses.
+        Args:
+            number (int): how many samples to draw.
+            coefficients (dict): validation dictionary specifying the details of the mixture pdf.
+            absolute_min_value (float): minimum possible value the pdf can take.
+            absolute_max_value (float): maximum possible value the pdf can take.
+
+        Returns:
+            a np.array containing samples drawn from the mixture.
+        """
+        # Define a dictionary of samples and work out how many we'll want to draw from each mixture
+        random_variables = np.empty(number)
+
+
+
+
 
 
 class BetaDistribution:

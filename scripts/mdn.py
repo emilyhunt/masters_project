@@ -495,7 +495,7 @@ class MixtureDensityNetwork:
         return map_values
 
     def plot_pdf(self, validation_data: dict, values_to_highlight, data_range=None, resolution: int=100,
-                 map_values=None, true_values=None, figure_directory: Optional[str]=None):
+                 map_values=None, true_values=None, figure_directory: Optional[str]=None, show_fig: bool=False):
         """Plots the mixture pdf of a given set of parameters.
 
         Args:
@@ -571,7 +571,12 @@ class MixtureDensityNetwork:
             if figure_directory is not None:
                 plt.savefig(figure_directory + '_pdf_' + str(an_object) + '.png')
 
-            # plt.show() todo killed
+            if show_fig:
+                plt.show()
+            else:
+                plt.close()
+                # todo make this stuff work
+
 
 
 # Unit tests: implements the class on the toy_mdn_emily example data, using data from the following blog post:
@@ -602,9 +607,10 @@ if __name__ == '__main__':
     # Initialise the network
     network = MixtureDensityNetwork(loss_funcs.NormalDistribution(),
                                     './logs/mdn_tests_tensorboard/' + str(time.strftime('%H-%M-%S', time.localtime(time.time()))),
-                                    regularization='L1',
+                                    regularization=None,
                                     x_features=1, y_features=1, layer_sizes=[20, 20],
-                                    mixture_components=15, learning_rate=1e-2)
+                                    mixture_components=15, learning_rate=1e-2,
+                                    y_scaling=None, x_scaling=None)
 
     # Set the data
     network.set_training_data(x_train, y_train)
@@ -623,7 +629,7 @@ if __name__ == '__main__':
     map_values = network.calculate_map(validation_results, reporting_interval=500)
 
     # Plot some pdfs
-    network.plot_pdf(validation_results, [0, 100, 200], map_values=map_values)
+    network.plot_pdf(validation_results, [0, 100, 200], map_values=map_values, show_fig=True)
 
 
     # Some code to plot a validation plot. Firstly, we have to generate points to pull from:
