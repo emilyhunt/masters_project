@@ -519,9 +519,9 @@ class MixtureDensityNetwork:
                 # If not, then we find quantiles corresponding to +- 1 sigma. This isn't theoretically as
                 # good, as the IQR is not guaranteed to contain the MAP value we found earlier.
                 else:
-                    limits = pymc3.stats.quantiles(random_deviates, qlist=[0.15865, 0.84135])  # Again, 1 sigma error.
-                    lower_limits[i] = limits[0.15865]
-                    upper_limits[i] = limits[0.84135]
+                    limits = pymc3.stats.quantiles(random_deviates, qlist=[15.865, 84.135])  # Again, 1 sigma error.
+                    lower_limits[i] = limits[15.865]
+                    upper_limits[i] = limits[84.135]
 
                 print('object {}, limits {}'.format(i, limits))
 

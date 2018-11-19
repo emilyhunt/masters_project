@@ -38,8 +38,8 @@ for a_signal_noise in signal_noise_levels:
 
 
 # Initialise twitter
-twit = twitter.TweetWriter()
-twit.write(twitter.initial_text('to test small networks and Normal distribution mixtures [running continues EmilyPC + a bugfix x3.]'), reply_to=-1)
+#twit = twitter.TweetWriter()
+# twit.write(twitter.initial_text('to test small networks and Normal distribution mixtures [running continues EmilyPC + a bugfix x3.]'), reply_to=-1)
 
 # Cycle over a number of different network configurations
 rates = [1e-3]#, 5e-3, 5e-4, 1e-4, 1e-3]
@@ -119,8 +119,7 @@ for a_size in sizes:
                                     save_name='./plots/18-11-05_blog_hyperparam_tuning/zinf_ztrue_' + config_name + a_signal_noise + '.png',
                                     plt_title='Blog data: true vs inferred redshift at ' + a_signal_noise,
                                     point_alpha=0.2, point_color=a_color, limits=[0, 3.0],
-                                    nmad=util.calculate_nmad(y_validate[:points_to_use].flatten(),
-                                                             validation_redshifts[a_signal_noise]))
+                                    show_nmad=True)
 
         twit.write(twitter.update_text('\nlayer config=' + str(a_size)
                                        + '\nmixtures=' + str(a_mix)

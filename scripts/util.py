@@ -50,6 +50,30 @@ def read_save(target: str, columns_to_keep: Optional[list]=None, new_column_name
     return data
 
 
+def where_valid_redshifts(spectroscopic_z, photometric_z, validity_condition: str='greater_than_zero'):
+    """Quick function to find and return where valid values exist for plotting.
+
+    Args:
+        spectroscopic_z (array-like): true/spec redshifts.
+        photometric_z (array-like): inferred/phot redshifts.
+        validity_condition (str): method to use. Choose from:
+            'greater_than_zero' - checks for negative redshifts (e.g. -99 in the CANDELS catalogue.)
+
+    Returns:
+        An array of indices of valid redshifts.
+    """
+    # Work out where there are valid spec and phot values
+    # > 0 is valid for the CANDELS catalogue, as anything set to -99 is invalid.
+    if validity_condition is 'greater_than_zero':
+        valid = np.where(np.logical_and(np.asarray(spectroscopic_z) > 0, np.asarray(photometric_z) > 0))[0]
+
+    # Otherwise... the specified validity condition isn't implemented!
+    else:
+        raise ValueError('specified validity condition is not implemented!')
+
+    return valid
+
+
 def calculate_nmad(spectroscopic_z, photometric_z, validity_condition: str='greater_than_zero'):
     """Calculates the normalised median absolute deviation between a set of photometric and spectroscopic redshifts,
     which is defined as:
@@ -59,27 +83,23 @@ def calculate_nmad(spectroscopic_z, photometric_z, validity_condition: str='grea
     Args:
         spectroscopic_z (list-like): spectroscopic/correct redshifts.
         photometric_z (list-like): photometric/inferred redshifts.
-        validity_condition (str):
+        validity_condition (str): validity condition to use with where_valid_redshifts().
 
     Returns:
         The NMAD, a float.
     """
     # Flatten arrays to avoid issues with them being the wrong size
-    spectroscopic_z = spectroscopic_z.flatten()
-    photometric_z = photometric_z.flatten()
+    spectroscopic_z = np.asarray(spectroscopic_z).flatten()
+    photometric_z = np.asarray(photometric_z).flatten()
 
     # Work out where there are valid spec and phot values
-    # > 0 is valid for the CANDELS catalogue, as anything set to -99 is invalid.
-    if validity_condition is 'greater_than_zero':
-        valid = np.where(np.logical_and(spectroscopic_z > 0, photometric_z > 0))[0]
-    else:
-        raise ValueError('specified validity condition is not implemented!')
+    valid = where_valid_redshifts(spectroscopic_z, photometric_z, validity_condition=validity_condition)
 
     # Calculate & return the NMAD
-    return 1.4826 * np.median(np.abs((photometric_z[valid] - spectroscopic_z[valid]) / (1 + photometric_z[valid])))
+    return 1.4826 * np.median(np.abs((photometric_z[valid] - spectroscopic_z[valid]) / (1 + spectroscopic_z[valid])))
 
 
-def single_gaussian_to_fit(x, standard_deviation, A, mean=0):
+def single_gaussian_to_fit(x, standard_deviation, A):
     """Allows a Gaussian to be accessed to fit a curve to, providing some slightly simpler notation than
     scipy.stats.norm.pdf. Only fits Gaussians of mean zero.
 
@@ -155,7 +175,6 @@ def fit_gaussians(x_range, y_range):
         my_params['s_s'] = 1
         my_params['s_A'] = 0
 
-
     # Fit the double Gaussian
     try:
         params_optimized, params_covariance = curve_fit(double_gaussian_to_fit, x_range, y_range,
@@ -175,3 +194,116 @@ def fit_gaussians(x_range, y_range):
         my_params['d_r'] = 0.5
 
     return my_params
+
+
+def make_3dhst_photometry_table(hdu_table, keys_to_keep, new_key_names=None):
+    """Creates a new photometry table in the pandas framework given a set of keys to keep and new names for them. By
+    creating a new object, it's nicer and also not read-only. You should delete the hdu_table after calling this if you
+    don't need it anymore.
+
+    Args:
+        hdu_table (astropy BinTableHDU object): table to read in.
+        keys_to_keep (list of str): keys to bother keeping from the read table.
+        new_key_names (None or list of str): new key names to assign to elements.
+
+    Returns:
+        A list, containing:
+            0. a scrumptuous and lovely pandas data frame.
+            1. a list of all the keys corresponding to flux (aka feed for a neural net.)
+            2. a list of all the keys corresponding to error (aka more feed for a neural net.)
+
+    """
+    # Step 1: let's make a data frame
+    data = pd.DataFrame()
+
+    if new_key_names is None:
+        new_key_names = keys_to_keep
+
+    for new_key, old_key in zip(new_key_names, keys_to_keep):
+        data[new_key] = hdu_table.data[old_key].byteswap().newbyteorder()
+
+    # Step 2: make fresh lists of the flux and error keys
+    flux_list = []
+    error_list = []
+
+    for a_string in new_key_names:
+
+        if 'f_' in a_string:
+            flux_list.append(a_string)
+
+        elif 'e_' in a_string and a_string != 'use_phot':
+            error_list.append(a_string)
+
+    return [data, flux_list, error_list]
+
+
+def check_photometric_coverage(data, columns_to_check: list, coverage_minimum: float=0.95, verbose: bool=True,
+                               check: str='not_minus_99', valid_photometry_column: str='use_phot'):
+    """Looks at which bands have enough coverage to be worth using, and suggests rows and columns to drop to achieve
+    this.
+
+    Args:
+        data (pd.DataFrame): data frame to act on.
+        columns_to_check (list of str): columns in the data frame to check.
+        coverage_minimum (float): required amount of coverage in a column to keep it.
+        verbose (bool): controls how much we print. True prints moaaar.
+        check (str): check to perform for valid values. Currently only one, which is 'not_minus_99'.
+        valid_photometry_column (str): name of a column that specifies rows that aren't for some reason screwed up.
+
+    Returns:
+        A list of:
+            0. columns_to_keep that can be used as training data (yay.)
+            1. columns_to_remove that have less than coverage_minimum
+            2. rows that have bad photometry
+            3. rows that have good photometry but oncomplete for these rows
+    """
+    # Have a look at how many good values are in all columns
+    column_coverage = np.zeros(len(columns_to_check), dtype=np.float)
+    columns_to_remove = []
+    columns_to_keep = []
+    total_length = data.shape[0]
+
+    if check == 'not_minus_99':
+        # Check for rows that have a bad photometry flag
+        rows_to_remove_bad_phot = np.where(data[valid_photometry_column] != 1)[0]
+        rows_to_keep_bad_phot = np.where(data[valid_photometry_column] == 1)[0]  # todo: fuck, you're lazy...
+
+        # Cycle over columns looking at their coverage
+        for column_i, a_column in enumerate(columns_to_check):
+            column_coverage[column_i] = \
+                np.where(data[a_column].iloc[rows_to_keep_bad_phot] > -99.0)[0].size / total_length
+
+            # Add the column to the naughty list if it isn't good enough
+            if column_coverage[column_i] < coverage_minimum:
+                columns_to_remove.append(a_column)
+            else:
+                columns_to_keep.append(a_column)
+
+        # Now, check look for bad rows that still have missing data. We do a massive np.where check across the whole
+        # array, then look for instances of True (where the condition isn't satisfied), then work out indeces of rows
+        # with more than one offender.
+        rows_to_remove_incomplete_phot = np.where(np.count_nonzero(
+            np.where(data[columns_to_keep].iloc[rows_to_keep_bad_phot] > -99.0, False, True), axis=1) > 0)[0]
+
+    else:
+        raise ValueError('specified check not implemented.')
+
+    if verbose:
+        print('I have checked the coverage of the data. I found that:')
+        print('{} of {} rows had a bad photometry warning flag and are not included.'
+              .format(rows_to_remove_bad_phot.size, total_length))
+        print('{} out of {} columns do not have coverage over {}% on good sources.'
+              .format(len(columns_to_remove), len(columns_to_check), coverage_minimum * 100))
+        print('These were: {}'
+              .format(columns_to_remove))
+        print('I also found that {} of {} rows would still have invalid values even after removing all the above.'
+              .format(rows_to_remove_incomplete_phot.size, data[columns_to_keep].iloc[rows_to_keep_bad_phot].shape[0]))
+        print('This leaves {:.2f}% of rows in the final data set.'
+              .format(100 * (1 - (rows_to_remove_incomplete_phot.size + rows_to_remove_bad_phot.size) / total_length)))
+
+    return [columns_to_keep, columns_to_remove, rows_to_remove_bad_phot, rows_to_remove_incomplete_phot]
+
+
+
+
+
