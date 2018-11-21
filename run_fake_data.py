@@ -97,25 +97,25 @@ for a_size in sizes:
 
         # Calculate how well everything worked, but only if the training was successful
         if training_success:
+            validation_mixtures = {}
             validation_results = {}
-            validation_redshifts = {}
             points_to_use = 2000
             for a_signal_noise in signal_noise_levels:
                 print(a_signal_noise)
                 network.set_validation_data(x_validate[a_signal_noise][:points_to_use],
                                             y_validate[:points_to_use].reshape(points_to_use, 1))
-                validation_results[a_signal_noise] = network.validate()
-                validation_redshifts[a_signal_noise] = network.calculate_validation_stats(validation_results[a_signal_noise],
-                                                                                          reporting_interval=int(points_to_use / 5))  # todo: this returns different stuff now after being changed!
-                network.plot_pdf(validation_results[a_signal_noise], [10, 100, 200],
-                                 map_values=validation_redshifts[a_signal_noise],
+                validation_mixtures[a_signal_noise] = network.validate()
+                validation_results[a_signal_noise] = network.calculate_validation_stats(validation_mixtures[a_signal_noise],
+                                                                                        reporting_interval=int(points_to_use / 5))  # todo: this returns different stuff now after being changed!
+                network.plot_pdf(validation_mixtures[a_signal_noise], [10, 100, 200],
+                                 map_values=validation_results[a_signal_noise]['map'],
                                  true_values=y_validate[:points_to_use].flatten(),
                                  figure_directory='./plots/18-11-05_blog_hyperparam_tuning/' + config_name + a_signal_noise)
 
             # Plot all of said results!
             colors = ['r', 'c', 'm']
             for a_signal_noise, a_color in zip(signal_noise_levels, colors):
-                z_plot.phot_vs_spec(y_validate[:points_to_use].flatten(), validation_redshifts[a_signal_noise],
+                z_plot.phot_vs_spec(y_validate[:points_to_use].flatten(), validation_results[a_signal_noise],
                                     save_name='./plots/18-11-05_blog_hyperparam_tuning/zinf_ztrue_' + config_name + a_signal_noise + '.png',
                                     plt_title='Blog data: true vs inferred redshift at ' + a_signal_noise,
                                     point_alpha=0.2, point_color=a_color, limits=[0, 3.0],

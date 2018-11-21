@@ -27,9 +27,9 @@ data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68']] = \
 
 
 # Take a look at the coverage in different photometric bands
-columns_to_train_with, columns_to_remove, rows_to_remove_bad_phot, rows_to_remove_incomplete_phot = \
+columns_to_train_with, columns_to_remove, rows_to_remove_are_stars, rows_to_remove_bad_phot, rows_to_remove_incomplete_phot = \
     util.check_photometric_coverage(data, flux_keys + error_keys, coverage_minimum=0.60,
-                                    valid_photometry_column='use_phot')
+                                    valid_photometry_column='use_phot', star_column='star_flag')
 
 """Returned on 19/11/18 with coverage_minimum at 0.6:
 I have checked the coverage of the data. I found that:
@@ -38,11 +38,13 @@ I have checked the coverage of the data. I found that:
 These were: ['f_f606wcand', 'f_h', 'e_f606wcand', 'e_h']
 I also found that 15831 of 39998 rows would still have invalid values even after removing all the above.
 This leaves 47.85% of rows in the final data set.
+!!! Before setting the stars flag, 66 sources in this final set were stars!!!
 """
 
 # Be reaaaally harsh about removing lots of poor data
-data = data.drop(columns=columns_to_remove,
-                 index=np.append(rows_to_remove_bad_phot, rows_to_remove_incomplete_phot)).reset_index()
+all_rows_to_remove = np.append(rows_to_remove_are_stars, np.append(rows_to_remove_bad_phot,
+                                                                   rows_to_remove_incomplete_phot))
+data = data.drop(columns=columns_to_remove, index=all_rows_to_remove).reset_index()
 
 has_spec_z = np.where(data['z_spec'] != -99.0)[0]
 
@@ -62,14 +64,14 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/candels_run_1/'
                                     y_scaling='min_max',
                                     x_features=x_train.shape[1],
                                     y_features=1,
-                                    layer_sizes=[20, 20, 10],
+                                    layer_sizes=[40, 40, 10],
                                     mixture_components=5,
                                     learning_rate=1e-3)
 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=10, max_runtime=1.0)
+exit_code, epochs, training_success = network.train(max_epochs=5000, max_runtime=5.0)
 
 network.plot_loss_function_evolution()
 
@@ -78,7 +80,7 @@ network.set_validation_data(x_validate, y_validate)
 validation_mixtures = network.validate()
 validation_results = network.calculate_validation_stats(validation_mixtures)
 
-network.plot_pdf(validation_results, [10, 100, 200],
+network.plot_pdf(validation_mixtures, [10, 100, 200],
                  map_values=validation_results['map'],
                  true_values=y_validate.flatten(),
                  figure_directory='./plots/18-11-19_candels_run_1/')

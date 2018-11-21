@@ -96,22 +96,41 @@ def calculate_nmad(spectroscopic_z, photometric_z, validity_condition: str='grea
     valid = where_valid_redshifts(spectroscopic_z, photometric_z, validity_condition=validity_condition)
 
     # Calculate & return the NMAD
-    return 1.4826 * np.median(np.abs((photometric_z[valid] - spectroscopic_z[valid]) / (1 + spectroscopic_z[valid])))
+    delta_z = photometric_z[valid] - spectroscopic_z[valid]
+    median_delta_z = np.median(delta_z)
+
+    return 1.4826 * np.median(np.abs((delta_z - median_delta_z) / (1 + spectroscopic_z[valid])))
 
 
-def single_gaussian_to_fit(x, standard_deviation, A):
+def single_gaussian_to_fit(x, standard_deviation, A, mean=0):
     """Allows a Gaussian to be accessed to fit a curve to, providing some slightly simpler notation than
-    scipy.stats.norm.pdf. Only fits Gaussians of mean zero.
+    scipy.stats.norm.pdf. Can fit Gaussians of any mean.
 
     Args:
         x (np.ndarray or float): point(s) to evaluate against.
         standard_deviation (np.ndarray or float): standard deviations of Gaussians.
         A (int, float): the amplitude of the Gaussian.
+        mean (np.ndarray or float): mean of the Gaussian. Default is 0.
     Returns:
         float or np.array of the pdf(s) that have been evaluated.
 
     """
-    return A * norm.pdf(x, loc=0, scale=standard_deviation)
+    return A * norm.pdf(x, loc=mean, scale=standard_deviation)
+
+
+def single_normal_to_fit(x, standard_deviation, mean=0):
+    """Allows a Normal distribution to be accessed to fit a curve to, providing some slightly simpler notation than
+    scipy.stats.norm.pdf. Can fit normal distributions of any mean.
+
+    Args:
+        x (np.ndarray or float): point(s) to evaluate against.
+        standard_deviation (np.ndarray or float): standard deviations of normals.
+        mean (np.ndarray or float): mean of the normal. Default is 0.
+    Returns:
+        float or np.array of the pdf(s) that have been evaluated.
+
+    """
+    return norm.pdf(x, loc=mean, scale=standard_deviation)
 
 
 def double_gaussian_to_fit(x, standard_deviation_1, standard_deviation_2, A, r):
@@ -129,7 +148,6 @@ def double_gaussian_to_fit(x, standard_deviation_1, standard_deviation_2, A, r):
 
     Returns:
         float or np.array of the pdf(s) that have been evaluated.
-
     """
     sqrt_2 = np.sqrt(2)
     term_1 = A * norm.pdf(x, loc=0, scale=sqrt_2*standard_deviation_1)
@@ -138,7 +156,7 @@ def double_gaussian_to_fit(x, standard_deviation_1, standard_deviation_2, A, r):
     return term_1 + term_2 + term_3
 
 
-def fit_gaussians(x_range, y_range):
+def fit_gaussians(x_range, y_range, fit_double_gaussian=True):
     """Function that handles fitting Gaussians to our final data using scipy.curve_fit. Is able to catch typical
     RuntimeErrors that occur from optimisation failing. Performs a fit for both a single and a double (convolved)
     Gaussian.
@@ -146,6 +164,7 @@ def fit_gaussians(x_range, y_range):
     Args:
         x_range (list-like): x points to fit against.
         y_range (list-like): y points to fit against.
+        fit_double_gaussian (bool): whether or not to try and fit a double Gaussian.
 
     Returns:
         A dict of parameters of fitting Gaussians, both for single and double Gaussians, which has keys:
@@ -176,18 +195,24 @@ def fit_gaussians(x_range, y_range):
         my_params['s_A'] = 0
 
     # Fit the double Gaussian
-    try:
-        params_optimized, params_covariance = curve_fit(double_gaussian_to_fit, x_range, y_range,
-                                                        p0=[1, 2, 1, 0.5],
-                                                        bounds=([0.01, 0.01, 0, 0],
-                                                                [np.inf, np.inf, np.inf, np.inf]),
-                                                        verbose=0, method='dogbox')
-        my_params['d_s1'] = params_optimized[0]
-        my_params['d_s2'] = params_optimized[1]
-        my_params['d_A'] = params_optimized[2]
-        my_params['d_r'] = params_optimized[3]
-    except RuntimeError:
-        print('Unable to fit double Gaussian, likely due to maximum number of function evals being exceeded!')
+    if fit_double_gaussian:
+        try:
+            params_optimized, params_covariance = curve_fit(double_gaussian_to_fit, x_range, y_range,
+                                                            p0=[1, 2, 1, 0.5],
+                                                            bounds=([0.01, 0.01, 0, 0],
+                                                                    [np.inf, np.inf, np.inf, np.inf]),
+                                                            verbose=0, method='dogbox')
+            my_params['d_s1'] = params_optimized[0]
+            my_params['d_s2'] = params_optimized[1]
+            my_params['d_A'] = params_optimized[2]
+            my_params['d_r'] = params_optimized[3]
+        except RuntimeError:
+            print('Unable to fit double Gaussian, likely due to maximum number of function evals being exceeded!')
+            my_params['d_s1'] = 1
+            my_params['d_s2'] = 1
+            my_params['d_A'] = 0
+            my_params['d_r'] = 0.5
+    else:
         my_params['d_s1'] = 1
         my_params['d_s2'] = 1
         my_params['d_A'] = 0
@@ -196,7 +221,42 @@ def fit_gaussians(x_range, y_range):
     return my_params
 
 
-def make_3dhst_photometry_table(hdu_table, keys_to_keep, new_key_names=None):
+def fit_normal(x_range, y_range):
+    """Function that handles fitting a normal distribution to our data using scipy.curve_fit. Is able to catch typical
+    RuntimeErrors that occur from optimisation failing. Performs a fit for only a single Normal distro.
+
+    Args:
+        x_range (list-like): x points to fit against.
+        y_range (list-like): y points to fit against.
+
+    Returns:
+        A dict of parameters of fit Normal parameters, which has keys:
+            s_m = mean of single Normal fit
+            s_s = standard deviation of single Normal fit
+
+        If the method fails, then parameters for a flat curve are returned.
+    """
+    # Make a blank dictionary for keeping our params in
+    my_params = {}
+
+    # Fit the first Normal
+    try:
+        params_optimized, params_covariance = curve_fit(single_normal_to_fit, x_range, y_range,
+                                                        p0=[1, 1],
+                                                        bounds=([0.00000001, -np.inf],
+                                                                [np.inf, np.inf]),
+                                                        verbose=0, method='dogbox')
+        my_params['s_s'] = params_optimized[0]
+        my_params['s_m'] = params_optimized[1]
+    except RuntimeError:
+        print('Unable to fit single Normal, likely due to maximum number of function evals being exceeded!')
+        my_params['s_s'] = 1
+        my_params['s_m'] = 0
+
+    return my_params
+
+
+def make_3dhst_photometry_table(hdu_table, keys_to_keep, new_key_names=None):  # todo: doesn't make sense that this isn't like read_save. Should change to be like that instead.
     """Creates a new photometry table in the pandas framework given a set of keys to keep and new names for them. By
     creating a new object, it's nicer and also not read-only. You should delete the hdu_table after calling this if you
     don't need it anymore.
@@ -238,7 +298,8 @@ def make_3dhst_photometry_table(hdu_table, keys_to_keep, new_key_names=None):
 
 
 def check_photometric_coverage(data, columns_to_check: list, coverage_minimum: float=0.95, verbose: bool=True,
-                               check: str='not_minus_99', valid_photometry_column: str='use_phot'):
+                               check: str='not_minus_99', valid_photometry_column: str='use_phot',
+                               star_column: str='star_flag'):
     """Looks at which bands have enough coverage to be worth using, and suggests rows and columns to drop to achieve
     this.
 
@@ -254,8 +315,9 @@ def check_photometric_coverage(data, columns_to_check: list, coverage_minimum: f
         A list of:
             0. columns_to_keep that can be used as training data (yay.)
             1. columns_to_remove that have less than coverage_minimum
-            2. rows that have bad photometry
-            3. rows that have good photometry but oncomplete for these rows
+            2. rows that are stars
+            3. rows that have bad photometry
+            4. rows that have good photometry but are incomplete for these rows
     """
     # Have a look at how many good values are in all columns
     column_coverage = np.zeros(len(columns_to_check), dtype=np.float)
@@ -264,9 +326,13 @@ def check_photometric_coverage(data, columns_to_check: list, coverage_minimum: f
     total_length = data.shape[0]
 
     if check == 'not_minus_99':
+        # Check for rows that are actually stars...
+        rows_to_remove_are_stars = np.where(data[star_column] == 1)[0]
+        rows_to_keep_are_stars = np.where(data[star_column] != 1)[0]
+
         # Check for rows that have a bad photometry flag
-        rows_to_remove_bad_phot = np.where(data[valid_photometry_column] != 1)[0]
-        rows_to_keep_bad_phot = np.where(data[valid_photometry_column] == 1)[0]  # todo: fuck, you're lazy...
+        rows_to_remove_bad_phot = np.where(data[valid_photometry_column].iloc[rows_to_keep_are_stars] != 1)[0]
+        rows_to_keep_bad_phot = np.where(data[valid_photometry_column].iloc[rows_to_keep_are_stars] == 1)[0]  # todo: fuck, you're lazy...
 
         # Cycle over columns looking at their coverage
         for column_i, a_column in enumerate(columns_to_check):
@@ -290,18 +356,22 @@ def check_photometric_coverage(data, columns_to_check: list, coverage_minimum: f
 
     if verbose:
         print('I have checked the coverage of the data. I found that:')
+        print('{} of {} rows have a star flag and are not included.'
+              .format(rows_to_remove_are_stars.size, total_length))
         print('{} of {} rows had a bad photometry warning flag and are not included.'
-              .format(rows_to_remove_bad_phot.size, total_length))
+              .format(rows_to_remove_bad_phot.size, data[columns_to_keep].iloc[rows_to_keep_are_stars].shape[0]))
         print('{} out of {} columns do not have coverage over {}% on good sources.'
               .format(len(columns_to_remove), len(columns_to_check), coverage_minimum * 100))
         print('These were: {}'
               .format(columns_to_remove))
         print('I also found that {} of {} rows would still have invalid values even after removing all the above.'
               .format(rows_to_remove_incomplete_phot.size, data[columns_to_keep].iloc[rows_to_keep_bad_phot].shape[0]))
-        print('This leaves {:.2f}% of rows in the final data set.'
-              .format(100 * (1 - (rows_to_remove_incomplete_phot.size + rows_to_remove_bad_phot.size) / total_length)))
+        print('This leaves a total of {:.2f}% of initial rows in the final data set.'
+              .format(100 * (1 - (rows_to_remove_incomplete_phot.size + rows_to_remove_bad_phot.size
+                                  + rows_to_remove_are_stars.size) / total_length)))
 
-    return [columns_to_keep, columns_to_remove, rows_to_remove_bad_phot, rows_to_remove_incomplete_phot]
+    return [columns_to_keep, columns_to_remove,
+            rows_to_remove_are_stars, rows_to_remove_bad_phot, rows_to_remove_incomplete_phot]
 
 
 

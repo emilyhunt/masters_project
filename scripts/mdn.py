@@ -288,6 +288,10 @@ class MixtureDensityNetwork:
                 # Run for requisite number of epochs until refresh (this stops print from being spammed on fast code)
                 epochs_in_this_report = 0
                 while epochs_in_this_report < epochs_per_report:
+
+                    # optimise: this could probably run quicker and use more CPU. Maybe there's a way to .run more things at once? Alternatively, maybe could have logging be toggleable (as that'll be a major hold-up: I suspect only one core can be used for writing data.)
+                    # optimise: is it possible to just do one .summary_writer call at the very end? ...
+
                     # Train the network in a new epoch
                     epoch += 1
                     summary_merge = tf.summary.merge_all()
@@ -522,8 +526,6 @@ class MixtureDensityNetwork:
                     limits = pymc3.stats.quantiles(random_deviates, qlist=[15.865, 84.135])  # Again, 1 sigma error.
                     lower_limits[i] = limits[15.865]
                     upper_limits[i] = limits[84.135]
-
-                print('object {}, limits {}'.format(i, limits))
 
             else:
                 print('Failed to find MAP for object {}!'.format(i))
