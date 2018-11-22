@@ -50,12 +50,13 @@ def read_save(target: str, columns_to_keep: Optional[list]=None, new_column_name
     return data
 
 
-def where_valid_redshifts(spectroscopic_z, photometric_z, validity_condition: str='greater_than_zero'):
+def where_valid_redshifts(redshift_1, redshift_2=None, validity_condition: str='greater_than_zero'):
     """Quick function to find and return where valid values exist for plotting.
 
     Args:
-        spectroscopic_z (array-like): true/spec redshifts.
-        photometric_z (array-like): inferred/phot redshifts.
+        redshift_1 (array-like): first redshift to check
+        redshift_2 (array-like or None): optional second redshifts to check. Both redshift 1 AND 2 must be valid to
+            return array indices. Should have identical shape to redshift_1. Default value is None.
         validity_condition (str): method to use. Choose from:
             'greater_than_zero' - checks for negative redshifts (e.g. -99 in the CANDELS catalogue.)
 
@@ -65,7 +66,10 @@ def where_valid_redshifts(spectroscopic_z, photometric_z, validity_condition: st
     # Work out where there are valid spec and phot values
     # > 0 is valid for the CANDELS catalogue, as anything set to -99 is invalid.
     if validity_condition is 'greater_than_zero':
-        valid = np.where(np.logical_and(np.asarray(spectroscopic_z) > 0, np.asarray(photometric_z) > 0))[0]
+        if redshift_2 is not None:
+            valid = np.where(np.logical_and(np.asarray(redshift_1) > 0, np.asarray(redshift_2) > 0))[0]
+        else:
+            valid = np.where(np.asarray(redshift_1) > 0)[0]
 
     # Otherwise... the specified validity condition isn't implemented!
     else:
@@ -78,7 +82,7 @@ def calculate_nmad(spectroscopic_z, photometric_z, validity_condition: str='grea
     """Calculates the normalised median absolute deviation between a set of photometric and spectroscopic redshifts,
     which is defined as:
 
-        NMAD = 1.4826 * median( absolute( (z_phot - z_spec) / (1 + z_phot) ) )
+        NMAD = 1.4826 * median( absolute( (z_phot - z_spec - median(z_phot - z_spec)) / (1 + z_phot) ) )
 
     Args:
         spectroscopic_z (list-like): spectroscopic/correct redshifts.
@@ -297,35 +301,140 @@ def make_3dhst_photometry_table(hdu_table, keys_to_keep, new_key_names=None):  #
     return [data, flux_list, error_list]
 
 
-def check_photometric_coverage(data, columns_to_check: list, coverage_minimum: float=0.95, verbose: bool=True,
-                               check: str='not_minus_99', valid_photometry_column: str='use_phot',
-                               star_column: str='star_flag'):
+def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, coverage_minimum: float=0.95, verbose: bool=True,
+                                     valid_photometry_column: str='use_phot', z_spec_column: str='z_spec',
+                                     missing_flux_handling: Optional[str]=None,
+                                     missing_error_handling: Optional[str]=None):
     """Looks at which bands have enough coverage to be worth using, and suggests rows and columns to drop to achieve
-    this.
+    this. ONLY COMPATIBLE WITH 3DHST DATA, as other surveys may mark poor data in different ways.
 
     Args:
         data (pd.DataFrame): data frame to act on.
         columns_to_check (list of str): columns in the data frame to check.
         coverage_minimum (float): required amount of coverage in a column to keep it.
         verbose (bool): controls how much we print. True prints moaaar.
-        check (str): check to perform for valid values. Currently only one, which is 'not_minus_99'.
         valid_photometry_column (str): name of a column that specifies rows that aren't for some reason screwed up.
+        z_spec_column (str): name of the column of spectroscopic redshifts.
+        missing_flux_handling (None or str): method to use to replace missing flux points.
+        missing_error_handling (None or str): method to use to replace missing error points.
 
     Returns:
-        A list of:
-            0. columns_to_keep that can be used as training data (yay.)
-            1. columns_to_remove that have less than coverage_minimum
-            2. rows that are stars
-            3. rows that have bad photometry
-            4. rows that have good photometry but are incomplete for these rows
+        A list containing data that has valid spectroscopic redshifts (0th element) and data without valid
+        spectroscopic redshifts (1st element).
     """
     # Have a look at how many good values are in all columns
-    column_coverage = np.zeros(len(columns_to_check), dtype=np.float)
+    all_columns_to_check = flux_keys + error_keys
+    column_coverage = np.zeros(len(all_columns_to_check), dtype=np.float)
     columns_to_remove = []
-    columns_to_keep = []
-    total_length = data.shape[0]
+    original_length = data.shape[0]
+
+    # Check everything, by looking at:
+    # 1. Whether or not they're affected by poor photometry/are stars (use_phot does both of these things)
+    # 2. Removing columns with the poorest coverage
+    # 3. Removing or processing rows that still have missing photometric data points
+    # 4. Whether or not they have spectroscopic redshifts available
+
+    print('Checking the photometric coverage of the dataset...')
+
+    # Step 1: So! The photometry check
+    bad_photometry = np.where(data[valid_photometry_column] == 1)[0]
+
+    print('Removing {} of {} galaxies with poor photometry.'
+          .format(bad_photometry.size, data.shape[0]))
+
+    data = data.drop(index=bad_photometry).reset_index()
+
+    # Step 2: Remove any columns with very poor coverage, as they aren't worth our time potentially
+    # Cycle over columns looking at their coverage: first for fluxes, then almost the same again for errors (except we
+    # only record the column coverages once, for flux keys)
+    for column_i, a_column in enumerate(flux_keys):
+        column_coverage[column_i] = \
+            np.where(data[a_column].iloc > -99.0)[0].size / data.shape[0]
+
+        # Add the column to the naughty list if it isn't good enough
+        if column_coverage[column_i] < coverage_minimum:
+            columns_to_remove.append(a_column)
+        flux_keys.remove(a_column)
+
+    for column_i, a_column in enumerate(error_keys):
+        a_column_coverage = np.where(data[a_column].iloc > -99.0)[0].size / data.shape[0]
+
+        # Add the column to the naughty list if it isn't good enough
+        if a_column_coverage < coverage_minimum:
+            columns_to_remove.append(a_column)
+        error_keys.remove(a_column)
+
+    print('{} out of {} columns do not have coverage over {}% on good sources.'
+          .format(len(columns_to_remove), len(all_columns_to_check), coverage_minimum * 100))
+    print('These were: {}'
+          .format(columns_to_remove))
+
+    data = data.drop(columns=columns_to_remove).reset_index()
+
+    # Step 3: Deal with missing photometric data points in one of a number of ways
+
+    # Method one: make them go away. We count occurrences of invalid redshifts row-wise, and then drop said bad rows
+    if missing_flux_handling is None:
+        print('Dealing with missing fluxes by removing said rows...')
+        rows_to_drop = np.where(np.count_nonzero(np.where(data[flux_keys] > -99.0,
+                                                            False, True), axis=1) > 0)[0]
+        data = data.drop(index=rows_to_drop).reset_index()
+        print('Removed {} of {} galaxies.'.format(rows_to_drop.size, data.shape[0]))
+
+    # Method two: set missing points to the mean value of that row.
+    elif missing_flux_handling == 'row_mean':
+        print('Dealing with missing data by setting it to the mean of rows...')
+        # Take the mean of each row, then reshape it into a vertical array and make it horizontally as wide as the
+        # number of flux rows
+        row_means = np.mean(data[flux_keys], axis=1)
+        row_means = np.repeat(row_means.reshape(-1, 1), len(flux_keys), axis=1)
+
+        # Grab the fluxes that need fixing and make the fixeyness happen!
+        fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=row_means)
+        print('{} of {} fluxes were modified.'
+              .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
+
+    # Method three: set missing points to the mean value of that row.
+    elif missing_flux_handling == 'column_mean':
+        print('poo')  # todo: this
+
+    else:
+        raise ValueError('specified missing_flux_handling not found/implemented/supported.')
+
+    # Now, do the same but with errors!
+    if missing_error_handling is None:
+        print('Dealing with missing errors by removing said rows...')
+        rows_to_drop = np.where(np.count_nonzero(np.where(data[error_keys] > -99.0,
+                                                          False, True), axis=1) > 0)[0]
+        data = data.drop(index=rows_to_drop).reset_index()
+        print('Removed {} of {} galaxies.'.format(rows_to_drop.size, data.shape[0]))
+
+    elif missing_error_handling == 'big_value':
+        print('Dealing with missing errors by setting them to a large value...')
+        # Set it to 100 times the maximum error in the catalogue
+        the_big_number = np.max(data[error_keys]) * 100
+
+
+    else:
+        raise ValueError('specified missing_error_handling not found/implemented/supported.')
+
+
+    # Step 4: Split the data into sets with and without spectroscopic redshifts
+    has_spec_z = np.where(data[z_spec_column] != -99.0)[0]
+    data_spec_z = data.iloc[has_spec_z].reset_index()
+    data_no_spec_z = data.drop(index=has_spec_z).reset_index()
+    print('{} out of {} galaxies have spectroscopic redshifts'.format(has_spec_z.size, data.shape[0]))
+
+    return [data_spec_z, data_no_spec_z, flux_keys, error_keys]
+
+
+"""
 
     if check == 'not_minus_99':
+        # Reduce to everything that's got spectroscopic redshifts
+        rows_to_remove_no_spec = np.where(data)
+
         # Check for rows that are actually stars...
         rows_to_remove_are_stars = np.where(data[star_column] == 1)[0]
         rows_to_keep_are_stars = np.where(data[star_column] != 1)[0]
@@ -372,6 +481,8 @@ def check_photometric_coverage(data, columns_to_check: list, coverage_minimum: f
 
     return [columns_to_keep, columns_to_remove,
             rows_to_remove_are_stars, rows_to_remove_bad_phot, rows_to_remove_incomplete_phot]
+            
+    """
 
 
 

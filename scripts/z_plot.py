@@ -455,7 +455,7 @@ if __name__ == '__main__':
     my_nmad = util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
 
     # Make a plot of the photometric redshifts against spectroscopic
-    #phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], show_nmad=True, show_fig=True, limits=[0, 7])
+    phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], show_nmad=True, show_fig=True, limits=[0, 7])
 
     # Remove everything within specific sky co-ordinates
     #redshifts = redshifts.iloc[redshifts.gs4_ra.values < 53.1]

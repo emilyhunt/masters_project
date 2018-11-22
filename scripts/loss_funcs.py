@@ -222,15 +222,15 @@ class BetaDistribution:
         """Lossfunc defined in simple numpy arrays. Will instead return a pdf for the given object. Fastest at
         evaluating lots of x data points: for instance, for initial minimum finding or for plotting a pdf.
 
-                Args:
-                    x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
-                    coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
-                                  of those values for the given object.
-                    sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
-                                  a big array of all the mixture components individually.
+        Args:
+            x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
+            coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                          of those values for the given object.
+            sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
+                          a big array of all the mixture components individually.
 
-                Returns:
-                    A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
+        Returns:
+            A 1D array of the pdf value(s) at whatever point(s) you've evaluated it at.
         """
         # Typecast x_data as a 1D numpy array and work out how many mixtures there are
         x_data = np.array([x_data]).flatten()

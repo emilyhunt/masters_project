@@ -217,11 +217,11 @@ class MixtureDensityNetwork:
             x_data = self.x_scaler.transform(x_data)
 
         # Scale the y data if requested, using the same scaling parameters as the training data
-        if self.y_scaler is not None:
-            y_data = self.y_scaler.transform(y_data)
+        #if self.y_scaler is not None:
+        #    y_data = self.y_scaler.transform(y_data)  todo: does this need ydata??!?!?
 
         # Add the new x_data, y_data
-        self.validation_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
+        self.validation_data = {self.x_placeholder: x_data} #, self.y_placeholder: y_data}
 
     def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10.):
         """Trains the tensorflow graph for the specified amount of time.
@@ -561,6 +561,8 @@ class MixtureDensityNetwork:
                  map_values=None, true_values=None, figure_directory: Optional[str]=None, show_fig: bool=False):
         """Plots the mixture pdf of a given set of parameters.
 
+        # todo: true_values should get flattened first as there can be issues with it being an odd shape
+
         Args:
             validation_data (dict): as returned by network.validate, this is the validation data to plot with.
             values_to_highlight (int, list-like of ints): IDs of the objects to plot pdfs for. Default: None.
@@ -620,12 +622,12 @@ class MixtureDensityNetwork:
             # If specified, plot the MAP value
             if map_values is not None:
                 plt.plot([map_values[an_object], map_values[an_object]], [total_pdf.min(), total_pdf.max()],
-                         'r-', label='MAP value')
+                         'r--', label='MAP value')
 
             # If specified, plot the MAP value
             if true_values is not None:
                 plt.plot([true_values[an_object], true_values[an_object]], [total_pdf.min(), total_pdf.max()],
-                         'r-', label='MAP value')
+                         'b--', label='True value')
 
             plt.legend(edgecolor='k', facecolor='w', fancybox=True)
             plt.title('PDF of object ' + str(an_object))
