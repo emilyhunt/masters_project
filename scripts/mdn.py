@@ -10,11 +10,11 @@ import pymc3
 from matplotlib import cm
 from scripts import loss_funcs
 from scripts.twitter import calc_local_time
-from scripts.twitter import short_time_now
 from typing import Optional
 from sklearn.model_selection import train_test_split
 from scipy.optimize import minimize as scipy_minimize
 from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import MinMaxScaler
 
 
@@ -32,7 +32,7 @@ class MixtureDensityNetwork:
             x_features (int): number of input x data points. Default is 1.
             y_features (int): number of input y data points
             layer_sizes (int, list-like): size of one layer (int) or a list of different sizes of each layer.
-            mixture_components (int): number of mixtures to try to use
+            mixture_components (int): number of mixtures to try to use todo: fnstring out of date
 
         Returns:
             None
@@ -78,9 +78,10 @@ class MixtureDensityNetwork:
                 self.graph_layers = []
 
                 # Join layers to x data
-                self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i], activation=tf.nn.tanh,
-                                                         kernel_regularizer=self.regularisation_function,
-                                                         name='hidden_layer_1'))
+                self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i],
+                                                          activation=tf.nn.tanh,
+                                                          kernel_regularizer=self.regularisation_function,
+                                                          name='hidden_layer_1'))
 
                 # Join layers to each other from here on out
                 i += 1
@@ -154,6 +155,8 @@ class MixtureDensityNetwork:
             self.x_scaler = MinMaxScaler(feature_range=(0.1, 0.9))  # todo: feature ranges are hard coded!
         elif x_scaling is 'robust':
             self.x_scaler = RobustScaler()
+        elif x_scaling is 'standard':
+            self.x_scaler = StandardScaler()
         elif x_scaling is None:
             self.x_scaler = None
         else:
@@ -163,6 +166,8 @@ class MixtureDensityNetwork:
             self.y_scaler = MinMaxScaler(feature_range=(0.1, 0.9))
         elif y_scaling is 'robust':
             self.y_scaler = RobustScaler()
+        elif y_scaling is 'standard':
+            self.y_scaler = StandardScaler()
         elif y_scaling is None:
             self.y_scaler = None
         else:
@@ -303,7 +308,7 @@ class MixtureDensityNetwork:
                     if np.isnan(self.loss[epoch + start_epoch]):
                         self.exit_reason = 'nan loss encountered'
                         self.training_success = False
-                        break
+                        break  # todo: could replace this with an exception catch instead for when nan loss happens
 
                     # Write out the summaries
                     summary = self.session.run(summary_merge, feed_dict=self.training_data)
@@ -326,6 +331,7 @@ class MixtureDensityNetwork:
 
                 if have_done_more_than_one_step:
                     print('finish_time = {}'.format(calc_local_time(finish_time)))
+                    # todo: evaluate whether or not we're gonna finish before the cutoff time
 
                 # Decide if we need to end
                 if now_time > cutoff_time:

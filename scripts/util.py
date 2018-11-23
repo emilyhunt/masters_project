@@ -337,19 +337,19 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
     print('Checking the photometric coverage of the dataset...')
 
     # Step 1: So! The photometry check
-    bad_photometry = np.where(data[valid_photometry_column] == 1)[0]
+    bad_photometry = np.where(data[valid_photometry_column] != 1)[0]
 
     print('Removing {} of {} galaxies with poor photometry.'
           .format(bad_photometry.size, data.shape[0]))
 
-    data = data.drop(index=bad_photometry).reset_index()
+    data = data.drop(index=bad_photometry).reset_index(drop=True)
 
     # Step 2: Remove any columns with very poor coverage, as they aren't worth our time potentially
     # Cycle over columns looking at their coverage: first for fluxes, then almost the same again for errors (except we
     # only record the column coverages once, for flux keys)
     for column_i, a_column in enumerate(flux_keys):
         column_coverage[column_i] = \
-            np.where(data[a_column].iloc > -99.0)[0].size / data.shape[0]
+            np.where(data[a_column] > -99.0)[0].size / data.shape[0]
 
         # Add the column to the naughty list if it isn't good enough
         if column_coverage[column_i] < coverage_minimum:
@@ -357,7 +357,7 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
         flux_keys.remove(a_column)
 
     for column_i, a_column in enumerate(error_keys):
-        a_column_coverage = np.where(data[a_column].iloc > -99.0)[0].size / data.shape[0]
+        a_column_coverage = np.where(data[a_column] > -99.0)[0].size / data.shape[0]
 
         # Add the column to the naughty list if it isn't good enough
         if a_column_coverage < coverage_minimum:
@@ -369,7 +369,7 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
     print('These were: {}'
           .format(columns_to_remove))
 
-    data = data.drop(columns=columns_to_remove).reset_index()
+    data = data.drop(columns=columns_to_remove).reset_index(drop=True)
 
     # Step 3: Deal with missing photometric data points in one of a number of ways
 
@@ -377,8 +377,8 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
     if missing_flux_handling is None:
         print('Dealing with missing fluxes by removing said rows...')
         rows_to_drop = np.where(np.count_nonzero(np.where(data[flux_keys] > -99.0,
-                                                            False, True), axis=1) > 0)[0]
-        data = data.drop(index=rows_to_drop).reset_index()
+                                                          False, True), axis=1) > 0)[0]
+        data = data.drop(index=rows_to_drop).reset_index(drop=True)
         print('Removed {} of {} galaxies.'.format(rows_to_drop.size, data.shape[0]))
 
     # Method two: set missing points to the mean value of that row.
@@ -386,7 +386,7 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
         print('Dealing with missing data by setting it to the mean of rows...')
         # Take the mean of each row, then reshape it into a vertical array and make it horizontally as wide as the
         # number of flux rows
-        row_means = np.mean(data[flux_keys], axis=1)
+        row_means = np.mean(np.asarray(data[flux_keys]), axis=1)
         row_means = np.repeat(row_means.reshape(-1, 1), len(flux_keys), axis=1)
 
         # Grab the fluxes that need fixing and make the fixeyness happen!
@@ -395,9 +395,18 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
         print('{} of {} fluxes were modified.'
               .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
 
-    # Method three: set missing points to the mean value of that row.
+    # Method three: set missing points to the mean value of that column.
     elif missing_flux_handling == 'column_mean':
-        print('poo')  # todo: this
+        print('Dealing with missing data by setting it to the mean of columns...')
+        # Take the mean of each column, then stretch it to be as long as the data itself
+        column_means = np.mean(np.asarray(data[flux_keys]), axis=0)
+        column_means = np.repeat(column_means.reshape(1, -1), data.shape[0], axis=0)
+
+        # Grab the fluxes that need fixing and make the fixeyness happen!
+        fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=column_means)
+        print('{} of {} fluxes were modified.'
+              .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
 
     else:
         raise ValueError('specified missing_flux_handling not found/implemented/supported.')
@@ -407,24 +416,28 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
         print('Dealing with missing errors by removing said rows...')
         rows_to_drop = np.where(np.count_nonzero(np.where(data[error_keys] > -99.0,
                                                           False, True), axis=1) > 0)[0]
-        data = data.drop(index=rows_to_drop).reset_index()
+        data = data.drop(index=rows_to_drop).reset_index(drop=True)
         print('Removed {} of {} galaxies.'.format(rows_to_drop.size, data.shape[0]))
 
     elif missing_error_handling == 'big_value':
         print('Dealing with missing errors by setting them to a large value...')
         # Set it to 100 times the maximum error in the catalogue
-        the_big_number = np.max(data[error_keys]) * 100
+        the_big_number = np.max(np.asarray(data[error_keys])) * 100
 
+        # Grab the fluxes that need fixing and make the fixeyness happen!
+        errors_to_fix = np.where(data[error_keys] == -99.0, False, True)
+        data[error_keys] = data[error_keys].where(errors_to_fix, other=the_big_number)
+        print('{} of {} errors were modified to a value of {}.'
+              .format(errors_to_fix.size - np.count_nonzero(errors_to_fix), errors_to_fix.size, the_big_number))
 
     else:
         raise ValueError('specified missing_error_handling not found/implemented/supported.')
 
-
     # Step 4: Split the data into sets with and without spectroscopic redshifts
-    has_spec_z = np.where(data[z_spec_column] != -99.0)[0]
-    data_spec_z = data.iloc[has_spec_z].reset_index()
-    data_no_spec_z = data.drop(index=has_spec_z).reset_index()
-    print('{} out of {} galaxies have spectroscopic redshifts'.format(has_spec_z.size, data.shape[0]))
+    has_spec_z = np.where(np.asarray(data[z_spec_column]) != -99.0)[0]
+    data_spec_z = data.iloc[has_spec_z].reset_index(drop=True)
+    data_no_spec_z = data.drop(index=has_spec_z).reset_index(drop=True)
+    print('{} out of {} galaxies have spectroscopic redshifts.'.format(has_spec_z.size, data.shape[0]))
 
     return [data_spec_z, data_no_spec_z, flux_keys, error_keys]
 

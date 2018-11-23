@@ -28,9 +28,9 @@ data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68']] = \
 
 # Take a look at the coverage in different photometric bands
 data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
-    util.check_photometric_coverage_3dhst(data, flux_keys, error_keys, coverage_minimum=0.60,
+    util.check_photometric_coverage_3dhst(data, flux_keys, error_keys, coverage_minimum=0.95,
                                           valid_photometry_column='use_phot',
-                                          missing_flux_handling='row_mean',
+                                          missing_flux_handling='column_mean',
                                           missing_error_handling='big_value')
 
 """Returned on 19/11/18 with coverage_minimum at 0.6:
@@ -43,19 +43,23 @@ This leaves 47.85% of rows in the final data set.
 !!! Before setting the stars flag, 66 sources in this final set were stars!!!
 """
 
-x = np.asarray(data_with_spec_z[reduced_flux_keys + reduced_error_keys])
+keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]
+
+x = np.asarray(data_with_spec_z[keys_in_order])
 y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
 
 # Split everything into training and validation data sets
 x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
 
 # Make a network
+run_super_name = '18-11-19_candels_run_1'
+run_name = 'std_scaling_col_means_95_cov'
+
 loss_function = loss_funcs.BetaDistribution()
 
-network = mdn.MixtureDensityNetwork(loss_function, './logs/candels_run_1/'
-                                    + str(time.strftime('%y-%m-%d-%H-%M-%S', time.localtime(time.time()))),
+network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
-                                    x_scaling='robust',
+                                    x_scaling='standard',
                                     y_scaling='min_max',
                                     x_features=x_train.shape[1],
                                     y_features=1,
@@ -66,7 +70,7 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/candels_run_1/'
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=5000, max_runtime=5.0)
+exit_code, epochs, training_success = network.train(max_epochs=5000, max_runtime=0.75)
 
 # network.plot_loss_function_evolution()
 
@@ -78,20 +82,27 @@ validation_results = network.calculate_validation_stats(validation_mixtures)
 network.plot_pdf(validation_mixtures, [10, 100, 200],
                  map_values=validation_results['map'],
                  true_values=y_validate.flatten(),
-                 figure_directory='./plots/18-11-19_candels_run_1/better_pp')
+                 figure_directory='./plots/' + run_super_name + '/' + run_name)
 
 z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=True, limits=[0, 7],
-                    save_name='./plots/18-11-19_candels_run_1/better_pp_phot_vs_spec.png')
+                    save_name='./plots/' + run_super_name + '/' + run_name + '/phot_vs_spec.png',
+                    plt_title=run_name)
+
+valid_map_values = util.where_valid_redshifts(validation_results['map'])
+z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], validation_results['map'][valid_map_values],
+                       validation_results['lower'][valid_map_values], validation_results['upper'], show_fig=True,
+                       save_name='./plots/' + run_super_name + '/' + run_name + '/errors.png',
+                       plt_title=run_name)
 
 
 # Run the pair algorithm on everything that didn't have photometric redshifts
-
-network.set_validation_data(data_no_spec_z[reduced_flux_keys + reduced_error_keys], 0)
+network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
 validation_results_no_spec_z = network.calculate_validation_stats(validation_mixtures_no_spec_z)
 
-all_galaxy_pairs, random_galaxy_pairs = galaxy_pairs.store_pairs_on_sky(data_no_spec_z['ra'],
-                                                                        data_no_spec_z['dec'],
+valid_map_values = util.where_valid_redshifts(validation_results_no_spec_z['map'])
+all_galaxy_pairs, random_galaxy_pairs = galaxy_pairs.store_pairs_on_sky(data_no_spec_z['ra'].iloc[valid_map_values],
+                                                                        data_no_spec_z['dec'].iloc[valid_map_values],
                                                                         max_separation=15., min_separation=1.5,
                                                                         max_move=26, min_move=25,
                                                                         size_of_random_catalogue=1.0,
@@ -100,16 +111,18 @@ all_galaxy_pairs, random_galaxy_pairs = galaxy_pairs.store_pairs_on_sky(data_no_
 
 max_z = 100.0
 min_z = 0.0
-all_galaxy_pairs_read_in = galaxy_pairs.read_pairs('./data/all_pairs.csv', validation_results_no_spec_z['map'],
+all_galaxy_pairs_read_in = galaxy_pairs.read_pairs('./data/all_pairs.csv', validation_results_no_spec_z['map'].iloc[valid_map_values],
                                                    min_redshift=min_z, max_redshift=max_z)
 
-random_galaxy_pairs_read_in = galaxy_pairs.read_pairs('./data/random_pairs.csv', validation_results_no_spec_z['map'],
+random_galaxy_pairs_read_in = galaxy_pairs.read_pairs('./data/random_pairs.csv', validation_results_no_spec_z['map'].iloc[valid_map_values],
                                                       min_redshift=min_z, max_redshift=max_z)
 
 # Make a plot of Npairs against deltaZ
-z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'],
+z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_map_values],
                                all_galaxy_pairs_read_in, random_galaxy_pairs_read_in,
-                               show_fig=True, save_name='./plots/18-11-19_candels_run_1/better_pp_pairs.png')
+                               show_fig=True,
+                               save_name='./plots/' + run_super_name + '/' + run_name + '/pairs_all.png',
+                               plt_title=run_name + '-- z {:.2f} to {:.2f}'.format(min_z, max_z))
 
 """
 # Initialise twitter
