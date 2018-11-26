@@ -52,25 +52,25 @@ y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
 x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
 
 # Make a network
-run_super_name = '18-11-19_candels_run_1'
-run_name = 'std_scaling_col_means_95_cov'
+run_super_name = '18-11-26_cdf_lossfunc'
+run_name = 'test_9_normal_long_run'
 
-loss_function = loss_funcs.BetaDistribution()
+loss_function = loss_funcs.NormalCDFLoss()
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
                                     x_scaling='standard',
-                                    y_scaling='min_max',
+                                    y_scaling=None,
                                     x_features=x_train.shape[1],
                                     y_features=1,
                                     layer_sizes=[20, 20, 10],
-                                    mixture_components=5,
+                                    mixture_components=1,
                                     learning_rate=1e-3)
 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=5000, max_runtime=0.75)
+exit_code, epochs, training_success = network.train(max_epochs=5000, max_runtime=1.0)
 
 # network.plot_loss_function_evolution()
 
@@ -82,7 +82,7 @@ validation_results = network.calculate_validation_stats(validation_mixtures)
 network.plot_pdf(validation_mixtures, [10, 100, 200],
                  map_values=validation_results['map'],
                  true_values=y_validate.flatten(),
-                 figure_directory='./plots/' + run_super_name + '/' + run_name)
+                 figure_directory='./plots/' + run_super_name + '/' + run_name + '/')
 
 z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=True, limits=[0, 7],
                     save_name='./plots/' + run_super_name + '/' + run_name + '/phot_vs_spec.png',
@@ -94,7 +94,7 @@ z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], valida
                        save_name='./plots/' + run_super_name + '/' + run_name + '/errors.png',
                        plt_title=run_name)
 
-
+"""
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
@@ -124,7 +124,7 @@ z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_ma
                                save_name='./plots/' + run_super_name + '/' + run_name + '/pairs_all.png',
                                plt_title=run_name + '-- z {:.2f} to {:.2f}'.format(min_z, max_z))
 
-"""
+
 # Initialise twitter
 #twit = twitter.TweetWriter()
 #twit.write(twitter.initial_text('on 3D-HST data with basic settings.'), reply_to=None)

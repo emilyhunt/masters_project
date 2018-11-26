@@ -66,11 +66,11 @@ for a_size in sizes:
         
         # Decide if we need to use a different loss function
         if a_size[0] is 10:
-            a_loss_func = loss_funcs.BetaDistribution()
+            a_loss_func = loss_funcs.BetaPDFLoss()
             config_name = str(a_size) + '-' + str(a_mix) + '_' + str(a_reg) + '_'
             func_name = 'beta'
         else:
-            a_loss_func = loss_funcs.NormalDistribution()
+            a_loss_func = loss_funcs.NormalPDFLoss()
             config_name = str(a_size) + '-' + str(a_mix) + '_' + str(a_reg) + '_norm_'
             func_name = 'normal'
         

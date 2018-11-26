@@ -675,7 +675,7 @@ if __name__ == '__main__':
     # plt.show()
 
     # Initialise the network
-    network = MixtureDensityNetwork(loss_funcs.NormalDistribution(),
+    network = MixtureDensityNetwork(loss_funcs.NormalPDFLoss(),
                                     './logs/mdn_tests_tensorboard/' + str(time.strftime('%H-%M-%S', time.localtime(time.time()))),
                                     regularization=None,
                                     x_features=1, y_features=1, layer_sizes=[20, 20],
