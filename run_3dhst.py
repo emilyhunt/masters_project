@@ -1,6 +1,7 @@
 """Trains a network on the real 3dhst good south data."""
 
 import numpy as np
+import os
 import pandas as pd
 import time
 from astropy.io import fits
@@ -53,24 +54,31 @@ x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=4
 
 # Make a network
 run_super_name = '18-11-26_cdf_lossfunc'
-run_name = 'test_9_normal_long_run'
+run_name = 'test_15_beta_pdf_big_mixture'
 
-loss_function = loss_funcs.NormalCDFLoss()
+run_dir = './plots/' + run_super_name + '/' + run_name + '/'
+
+try:
+    os.mkdir(run_dir)
+except FileExistsError:
+    print('Not making a new directory because it already exists. I hope you changed the name btw!')
+
+loss_function = loss_funcs.BetaPDFLoss()
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
                                     x_scaling='standard',
-                                    y_scaling=None,
+                                    y_scaling='min_max',
                                     x_features=x_train.shape[1],
                                     y_features=1,
-                                    layer_sizes=[20, 20, 10],
-                                    mixture_components=1,
+                                    layer_sizes=[60, 60, 60],
+                                    mixture_components=30,
                                     learning_rate=1e-3)
 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=5000, max_runtime=1.0)
+exit_code, epochs, training_success = network.train(max_epochs=10000, max_runtime=1.0)
 
 # network.plot_loss_function_evolution()
 
@@ -82,16 +90,16 @@ validation_results = network.calculate_validation_stats(validation_mixtures)
 network.plot_pdf(validation_mixtures, [10, 100, 200],
                  map_values=validation_results['map'],
                  true_values=y_validate.flatten(),
-                 figure_directory='./plots/' + run_super_name + '/' + run_name + '/')
+                 figure_directory=run_dir)
 
 z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=True, limits=[0, 7],
-                    save_name='./plots/' + run_super_name + '/' + run_name + '/phot_vs_spec.png',
+                    save_name=run_dir + 'phot_vs_spec.png',
                     plt_title=run_name)
 
 valid_map_values = util.where_valid_redshifts(validation_results['map'])
 z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], validation_results['map'][valid_map_values],
                        validation_results['lower'][valid_map_values], validation_results['upper'], show_fig=True,
-                       save_name='./plots/' + run_super_name + '/' + run_name + '/errors.png',
+                       save_name=run_dir + 'errors.png',
                        plt_title=run_name)
 
 """

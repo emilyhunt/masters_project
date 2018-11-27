@@ -138,8 +138,10 @@ class MixtureDensityNetwork:
                 # Make us a cheeky summary writer to write all of our summaries to file
                 self.summary_writer = tf.summary.FileWriter(summary_directory, self.graph)
 
-        # Create a blank loss array we can append more stuff to later for recording the loss function evolution
+        # Create a blank loss & time array we can append more stuff to later for recording the loss function evolution
+        self.recording_steps = np.array([])
         self.loss = np.array([])
+        self.epoch_times = np.array([])
 
         # Initialise blank feed dictionaries and a data range list we use to constrain later MAP value guessing
         self.y_data_range = None
@@ -251,37 +253,56 @@ class MixtureDensityNetwork:
         print('reporting_time = {:.1f} seconds'.format(reporting_time))
         print('==========================')
 
-        # Correct for if training has been ran before. Note that epoch is one-indexed, so we subtract one from
-        # start_epoch to make sure calls to self.loss are all correct.
-        start_epoch = self.loss.size - 1
-        epoch = 1
-
-        # Append blank space onto the loss evolution recording array
-        self.loss = np.append(self.loss, np.empty(max_epochs))
+        # Correct for if training has been ran before.
+        if self.recording_steps.size != 0:
+            start_epoch = self.recording_steps[-1]
+        else:
+            start_epoch = 0
+        epoch = start_epoch
+        max_epochs = start_epoch + max_epochs
 
         with self.graph.as_default():
-            # Time the first step to get an estimate of how long each step will take
-            epoch_time = time.time()
-
-            summary_merge = tf.summary.merge_all()
-            self.session.run(self.train_function, feed_dict=self.training_data)
-            self.loss[epoch + start_epoch] = self.session.run(self.loss_total, feed_dict=self.training_data)
-
-            if np.isnan(self.loss[epoch + start_epoch]):
-                self.exit_reason = 'nan loss encountered'
-                self.training_success = False
-                return [self.exit_reason, epoch, self.training_success]
-
-            summary = self.session.run(summary_merge, feed_dict=self.training_data)
-            self.summary_writer.add_summary(summary, epoch + start_epoch)
-
-            epoch_time = time.time() - epoch_time
-
-            # Cycle over, doing some running
+            # Set some defaults so that we don't fail on the first run
             self.exit_reason = 'max_epochs reached'  # Cheeky string that says why we finished training
             have_done_more_than_one_step = False  # Stop stupid predictions being made too early
+            epochs_per_report = 1
+            step_start_time = time.time()
+
+            # Cycle over, doing some running
             while epoch < max_epochs:
+
+                # Run for requisite number of epochs until refresh (this stops print from being spammed on fast code)
+                epochs_in_this_report = 0
+                while epochs_in_this_report < epochs_per_report:
+                    # optimise: make logging toggleable
+                    # Train the network in a new epoch
+                    self.session.run(self.train_function, feed_dict=self.training_data)
+                    epoch += 1
+                    epochs_in_this_report += 1
+
+                # Calculate the new epoch time and ETA
+                step_end_time = time.time()
+                epoch_time = (step_end_time - step_start_time) / epochs_per_report
                 step_start_time = time.time()
+                finish_time = (max_epochs - epoch) * epoch_time + step_start_time
+
+                # Record the loss
+                self.recording_steps = np.append(self.recording_steps, epoch)
+                self.loss = np.append(self.loss, self.session.run(self.loss_from_function, feed_dict=self.training_data))
+                self.epoch_times = np.append(self.epoch_times, epoch_time)
+
+                # Check for nan loss, and if not, then write a summary
+                if np.isnan(self.loss[-1]):  # todo: could replace this with an exception catch instead for when nan loss happens
+                    self.exit_reason = 'nan loss encountered'
+                    self.training_success = False
+                else:
+                    # Write out the summaries
+                    summary_merge = tf.summary.merge_all()
+                    summary = self.session.run(summary_merge, feed_dict=self.training_data)
+                    self.summary_writer.add_summary(summary, epoch + start_epoch)
+
+                # Force garbage collection (sometimes helps to prevent memory issues... sometimes.)
+                gc.collect()
 
                 # Work out how many epochs we can do before our next check-in
                 epochs_per_report = int(np.ceil(reporting_time / epoch_time))
@@ -290,51 +311,19 @@ class MixtureDensityNetwork:
                 if epoch + epochs_per_report > max_epochs:
                     epochs_per_report = max_epochs - epoch
 
-                # Run for requisite number of epochs until refresh (this stops print from being spammed on fast code)
-                epochs_in_this_report = 0
-                while epochs_in_this_report < epochs_per_report:
-
-                    # optimise: this could probably run quicker and use more CPU. Maybe there's a way to .run more things at once? Alternatively, maybe could have logging be toggleable (as that'll be a major hold-up: I suspect only one core can be used for writing data.)
-                    # optimise: is it possible to just do one .summary_writer call at the very end? ...
-
-                    # Train the network in a new epoch
-                    epoch += 1
-                    summary_merge = tf.summary.merge_all()
-                    self.session.run(self.train_function, feed_dict=self.training_data)
-
-                    # Calculate loss and make sure it isn't a nan
-                    self.loss[epoch + start_epoch] = self.session.run(self.loss_total,
-                                                                      feed_dict=self.training_data)
-                    if np.isnan(self.loss[epoch + start_epoch]):
-                        self.exit_reason = 'nan loss encountered'
-                        self.training_success = False
-                        break  # todo: could replace this with an exception catch instead for when nan loss happens
-
-                    # Write out the summaries
-                    summary = self.session.run(summary_merge, feed_dict=self.training_data)
-                    self.summary_writer.add_summary(summary, epoch + start_epoch)
-                    epochs_in_this_report += 1
-
-                    # Force garbage collection (sometimes helps to prevent memory issues... sometimes.)
-                    gc.collect()
-
-                # Calculate the new epoch time and ETA
-                now_time = time.time()
-                finish_time = (max_epochs - epoch) * epoch_time + now_time
-
                 # Output some details on the last few epochs
                 print('--------------------------')
-                print('CURRENT TIME: {}'.format(calc_local_time(now_time)))
+                print('CURRENT TIME: {}'.format(calc_local_time(step_start_time)))
                 print('epoch       = {} ({:.1f}% done)'.format(epoch, epoch / float(max_epochs) * 100))
                 print('epoch_time  = {:.3f} seconds'.format(epoch_time))
-                print('loss        = {:.5f}'.format(self.loss[epoch + start_epoch - 1]))
+                print('loss        = {:.5f}'.format(self.loss[-1]))
 
                 if have_done_more_than_one_step:
                     print('finish_time = {}'.format(calc_local_time(finish_time)))
                     # todo: evaluate whether or not we're gonna finish before the cutoff time
 
                 # Decide if we need to end
-                if now_time > cutoff_time:
+                if step_start_time > cutoff_time:
                     self.exit_reason = 'time limit reached'
                     self.training_success = True
                     break
@@ -343,8 +332,6 @@ class MixtureDensityNetwork:
                     break
 
                 have_done_more_than_one_step = True
-                step_end_time = time.time()
-                epoch_time = (step_end_time - step_start_time) / epochs_per_report
 
         # Make sure to update the training success bool if it did indeed work
         if self.exit_reason == 'max_epochs reached':
@@ -414,9 +401,17 @@ class MixtureDensityNetwork:
             end = self.loss.size
 
         # Plot some stuff!
-        plt.figure()
-        plt.plot(np.arange(start, end), self.loss[start:end], 'r-')
-        plt.title('Loss function evolution')
+        fig = plt.figure(figsize=(4, 6))
+        ax_loss = fig.add_subplot(2, 1, 1)
+        ax_time = fig.add_subplot(2, 1, 2, sharex=ax_loss)
+        ax_loss.plot(self.recording_steps, self.loss[start:end], 'r-', label='loss')
+        ax_time.plot(self.recording_steps, self.epoch_times[start:end], 'b-', label='epoch time')
+
+        ax_loss.set_title('Loss function evolution')
+        ax_loss.set_ylabel('Loss')
+
+        ax_time.set_xlabel('Epoch')
+        ax_time.set_ylabel('Epoch time')
 
         # Set the plot to be log if desired
         if y_log:

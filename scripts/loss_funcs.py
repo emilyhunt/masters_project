@@ -490,6 +490,7 @@ class NormalCDFLoss:
             a float giving the loss
         """
         with tf.variable_scope('loss_func_evaluation'):
+            # DISTRIBUTION CONFIDENCE AND SYSTEMATIC BIAS EVALUATION
             # Initialise all of our lovely beta distribution friends
             distributions = tf.distributions.Normal(coefficients['means'], coefficients['std_deviations'])
 
@@ -503,17 +504,26 @@ class NormalCDFLoss:
             # Sort and cumulatively sum the result, weighting it with the total sum of the cdfs so that the maximum val
             # in summed_cdfs is 1.0
             sorted_cdfs = tf.contrib.framework.sort(weighted_cdfs, axis=0)
-            summed_cdfs = tf.math.cumsum(sorted_cdfs, axis=0)
+            summed_cdfs = tf.math.cumsum(weighted_cdfs, axis=0)
             summed_cdfs = tf.divide(summed_cdfs, summed_cdfs[-1])
 
-            # Minimise the residual between the cumulative sum of cdf evaluations and a linear series of numbers, that
-            # we would expect the cumulative sum to take if it was correct
-            expected_cdf = tf.linspace(0.0, 1.0, num=tf.shape(summed_cdfs)[0])  # optimise: this is declared every time
-            cdf_residual = tf.square(tf.subtract(summed_cdfs, expected_cdf))
+            # Calculate the mean squared residual between summed cdfs and sorted cdfs
+            cdf_residual = tf.reduce_mean(tf.square(tf.subtract(summed_cdfs, sorted_cdfs)))
 
-            mean_residual = tf.reduce_mean(tf.square(coefficients['means'] - true_values))
+            # DISTRIBUTION ACCURACY EVALUATION
+            # map_residual = tf.log(tf.reduce_mean(tf.square(tf.subtract(coefficients['means'][:, 0], true_values[:, 0]))))
 
-            return tf.log(tf.multiply(tf.reduce_sum(cdf_residual), mean_residual))
+            # Calculate normal distribution mixture and normalise
+            weighted_pdfs = tf.multiply(distributions.prob(tiled_true_values), coefficients['weights'])
+
+            # Sum the result and take the negative mean
+            summed_pdfs = tf.reduce_sum(weighted_pdfs, 1, keepdims=False)
+            mean_log_pdf = tf.reduce_mean(tf.log(summed_pdfs))
+            pdf_residual = tf.multiply(mean_log_pdf, -1)
+
+            #cdf_residual = tf.constant(1.0)
+
+            return tf.add(cdf_residual, pdf_residual)
 
 
     @staticmethod
@@ -576,6 +586,8 @@ class NormalCDFLoss:
         Returns:
             a np.array containing samples drawn from the mixture.
         """
+        # Todo: I fail really badly when passed a python list (it makes number_weights into a longer list, it's owwie)
+
         # Define a dictionary of samples and work out how many we'll want to draw from each mixture
         random_variables = np.empty(n_samples)
         number_weights = np.around(coefficients['weights'] * n_samples).astype(int)

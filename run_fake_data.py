@@ -121,6 +121,7 @@ for a_size in sizes:
                                     point_alpha=0.2, point_color=a_color, limits=[0, 3.0],
                                     show_nmad=True)
 
+"""
         twit.write(twitter.update_text('\nlayer config=' + str(a_size)
                                        + '\nmixtures=' + str(a_mix)
                                        + '\nreg=' + str(a_reg)
@@ -132,7 +133,7 @@ for a_size in sizes:
 twit.write(twitter.annoy_me('Everything is done! YAY'))
 
 
-"""
+
 network.plot_loss_function_evolution()
 
 # Calculate how well everything worked!
