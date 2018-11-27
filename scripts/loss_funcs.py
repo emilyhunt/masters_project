@@ -37,34 +37,31 @@ class NormalPDFLoss:
         # A useful constant to keep around
         self.one_div_sqrt_two_pi = np.float64(1 / np.sqrt(2 * np.pi))
 
-    def tensor_normal_pdf(self, a_point, my_means, my_std_deviations):
-        """A normal distribution implemented in tensorflow notation."""
-        with tf.variable_scope('normal_dist'):
-            result = tf.subtract(a_point, my_means)
-            result = tf.multiply(result, tf.reciprocal(my_std_deviations))
-            result = -tf.square(result) / np.float64(2)
-            return tf.multiply(tf.exp(result), tf.reciprocal(my_std_deviations)) * self.one_div_sqrt_two_pi
-
-    def tensor_evaluate(self, a_point, coefficients):
+    @staticmethod
+    def tensor_evaluate(true_values, coefficients):
         """Lossfunc defined in tensorflow notation.
 
         Args:
-            a_point: the y/dependent variable data to evaluate against.
+            true_values: the y/dependent variable data to evaluate against.
             coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument.
 
         Returns:
             a float giving the loss
         """
         with tf.variable_scope('loss_func_evaluation'):
-            # Calculate normal distribution mixture and normalise
-            result = self.tensor_normal_pdf(a_point, coefficients['means'], coefficients['std_deviations'])
-            result = tf.multiply(result, coefficients['weights'])
+            # Initialise all of our lovely distribution friends
+            distributions = tf.distributions.Normal(coefficients['means'], coefficients['std_deviations'])
 
-            # Sum the result and take the mean negative log
-            # todo: mean log is sensitive to outliers
-            result = tf.reduce_sum(result, 1, keepdims=True)
-            result = -tf.log(result)
-            return tf.reduce_mean(result)
+            # Tile the true values so that they have the same shape as the distributions and can be evaluated
+            tiled_true_values = tf.tile(true_values, [1, tf.shape(coefficients['means'])[1]])
+
+            # Evaluate the PDF of all the distributions, then do some summing to find the PDF of the overall mixtures
+            weighted_pdfs = tf.multiply(distributions.prob(tiled_true_values), coefficients['weights'])
+            weighted_pdfs = tf.reduce_sum(weighted_pdfs, axis=1, keepdims=False)
+
+            # Take the mean negative log and return
+            log_pdfs = -tf.log(weighted_pdfs)
+            return tf.reduce_mean(log_pdfs)
 
     @staticmethod
     def pdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
@@ -174,48 +171,30 @@ class BetaPDFLoss:
                                   tf.initializers.zeros]
 
     @staticmethod
-    def tensor_log_gamma(x):
-        """A fast approximate log gamma function from Paul Mineiro. See:
-        http://www.machinedlearnings.com/2011/06/faster-lda.html
-        """
-        with tf.variable_scope('gamma_dist'):
-            log_term = tf.log(x * (1.0 + x) * (2.0 + x))
-            x_plus_3 = 3.0 + x
-            return -2.081061466 - x + 0.0833333 / x_plus_3 - log_term + (2.5 + x) * tf.log(x_plus_3)
-
-    def tensor_beta_pdf(self, a_point, alpha, beta):
-        """An APPROXIMATE (& fast) beta distribution implemented in tensorflow notation."""
-        with tf.variable_scope('beta_dist'):
-            exp1 = tf.subtract(alpha, 1.0)
-            exp2 = tf.subtract(beta, 1.0)
-            d1 = tf.multiply(exp1, tf.log(a_point))
-            d2 = tf.multiply(exp2, tf.log(tf.subtract(1.0, a_point)))
-            f1 = tf.add(d1, d2)
-            f2 = self.tensor_log_gamma(alpha)
-            f3 = self.tensor_log_gamma(beta)
-            f4 = self.tensor_log_gamma(alpha + beta)
-            return tf.exp(tf.add((tf.subtract(f4, tf.add(f2, f3))), f1))
-
-    def tensor_evaluate(self, a_point, coefficients):
+    def tensor_evaluate(true_values, coefficients):
         """Lossfunc defined in tensorflow notation.
 
         Args:
-            a_point: the y/dependent variable data to tensor_evaluate against.
+            true_values: the y/dependent variable data to tensor_evaluate against.
             coefficients: a dictionary with a 'weights', 'means' and 'std_deviations' argument.
 
         Returns:
             a float giving the loss
         """
         with tf.variable_scope('loss_func_evaluation'):
-            # Calculate normal distribution mixture and normalise
-            result = self.tensor_beta_pdf(a_point, coefficients['alpha'], coefficients['beta'])
-            result = tf.multiply(result, coefficients['weights'])
+            # Initialise all of our lovely distribution friends
+            distributions = tf.distributions.Beta(coefficients['alpha'], coefficients['beta'])
 
-            # Sum the result and take the mean negative log
-            result = tf.reduce_sum(result, 1, keepdims=True)
-            result = -tf.log(result)
-            # result = tf.where(tf.is_nan(result), tf.ones_like(result) * 10000, result)
-            return tf.reduce_mean(result)
+            # Tile the true values so that they have the same shape as the distributions and can be evaluated
+            tiled_true_values = tf.tile(true_values, [1, tf.shape(coefficients['alpha'])[1]])
+
+            # Evaluate the PDF of all the distributions, then do some summing to find the PDF of the overall mixtures
+            weighted_pdfs = tf.multiply(distributions.prob(tiled_true_values), coefficients['weights'])
+            weighted_pdfs = tf.reduce_sum(weighted_pdfs, axis=1, keepdims=False)
+
+            # Take the mean negative log and return
+            log_pdfs = -tf.log(weighted_pdfs)
+            return tf.reduce_mean(log_pdfs)
 
     @staticmethod
     def pdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
@@ -314,6 +293,8 @@ class BetaCDFLoss:
                                          applied to layers.
             - self.coefficient_names: a list of the names of each mixture coefficient.
         """
+
+        raise NotImplementedError('Beta CDF hasn\t been implemented, silly!')
         # Names of and activation functions to apply to each output layer.
         self.coefficient_names = ['weights', 'alpha', 'beta']
         self.activation_functions = [tf.nn.softmax, tf.exp, tf.exp]

@@ -54,7 +54,7 @@ x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=4
 
 # Make a network
 run_super_name = '18-11-26_cdf_lossfunc'
-run_name = 'test_15_beta_pdf_big_mixture'
+run_name = 'test_20_normal_pdf_faster'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'
 
@@ -63,16 +63,16 @@ try:
 except FileExistsError:
     print('Not making a new directory because it already exists. I hope you changed the name btw!')
 
-loss_function = loss_funcs.BetaPDFLoss()
+loss_function = loss_funcs.NormalPDFLoss()
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
                                     x_scaling='standard',
-                                    y_scaling='min_max',
+                                    y_scaling=None,
                                     x_features=x_train.shape[1],
                                     y_features=1,
-                                    layer_sizes=[60, 60, 60],
-                                    mixture_components=30,
+                                    layer_sizes=[30, 30, 20],
+                                    mixture_components=5,
                                     learning_rate=1e-3)
 
 network.set_training_data(x_train, y_train)
