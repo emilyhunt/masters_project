@@ -230,13 +230,22 @@ class MixtureDensityNetwork:
         # Add the new x_data, y_data
         self.validation_data = {self.x_placeholder: x_data} #, self.y_placeholder: y_data}
 
-    def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10.):
+    def train(self, max_epochs: int=50, max_runtime: float=1., reporting_time: float=10.,
+              max_epochs_without_report: int=1000):
         """Trains the tensorflow graph for the specified amount of time.
 
         Args:
             max_epochs (int): number of training epochs to run the network for.
             max_runtime (int): maximum number of hours the code will run for before exiting.
             reporting_time (float): how often, in seconds, we print to the console.
+            max_epochs_without_report (int): longest time to wait without letting the user know how everything is going
+                and storing diagnostic info.
+
+        Returns:
+            A list of:
+                0. The exit reason
+                1. The epoch reached
+                2. A bool of whether or not the training was a success
         """
         # optimise: a way to record loss in-place would make this a little bit faster
         # todo: exit automatically when loss function converges.
@@ -310,6 +319,8 @@ class MixtureDensityNetwork:
                 # Make sure we aren't gonna go over max_epochs
                 if epoch + epochs_per_report > max_epochs:
                     epochs_per_report = max_epochs - epoch
+                if epochs_per_report > max_epochs_without_report:
+                    epochs_per_report = max_epochs_without_report
 
                 # Output some details on the last few epochs
                 print('--------------------------')

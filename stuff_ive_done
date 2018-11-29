@@ -12,16 +12,22 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
-import time
-now = time.localtime(time.time())
-if now.tm_year % 4 == 0:
-    leap_year = 1
-else:
-    leap_year = 0
-sleeps = 359 + 2*leap_year - now.tm_yday + 365
-sleeps = sleeps % (365 + leap_year)
-print("Sleeps to xmas: {}".format(sleeps))
 
+
+
+29/11/18
+~~ Info on different tuning tests ~~
+- Removing outliers is a bad idea
+- Linear interpolation between points doesn't help as much as you might hope - it presumably removes too many features
+- Removing nan values from the mean seemed to make the column means estimate... worse?! (adds more outliers though)
+- Normalised column means don't help at all vs column means it seems
+- Robust scaling is indeedy a bit shite, and causes horizontal lines
+- Not removing any columns at all is a Good Idea
+- Normalised column mean has a marginally higher NMAD but marginally fewer outliers - test 14
+
+---- Week IX ----
+
+--------------------------
 
 
 02/11/18

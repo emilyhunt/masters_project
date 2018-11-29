@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import sys
 from astropy.io import fits
 from scipy.io.idl import readsav as scipy_readsav
 from scipy.optimize import curve_fit
@@ -49,6 +50,58 @@ def read_save(target: str, columns_to_keep: Optional[list]=None, new_column_name
             data = data[columns_to_keep]
 
     return data
+
+
+def read_fits(fits_file_location: str, columns_to_keep: list, fits_index_to_read: int=1, new_column_names: bool=None,
+              get_flux_and_error_keys: bool=False):
+    """Creates a new photometry table in the pandas framework given a fits file, a set of keys to keep and new names for
+    them. By creating a new object, it's nicer and also not read-only.
+
+    Args:
+        fits_file_location (location of an astropy BinTableHDU object): table to read in.
+        columns_to_keep (list of str): keys to bother keeping from the read table.
+        fits_index_to_read (int): index of the fits file to read in. Default is 1 (0 is usually a header.)
+        new_column_names (None or list of str): new key names to assign to elements.
+        get_flux_and_error_keys (bool): whether or not to look for flux and error keys and return them.
+
+    Returns:
+        A list, containing:
+            0. a scrumptuous and lovely pandas data frame.
+            (1. a list of all the keys corresponding to flux (aka feed for a neural net.))
+            (2. a list of all the keys corresponding to error (aka more feed for a neural net.))
+
+    """
+    # Step 0: read in the fits file
+    fits_file = fits.open(fits_file_location)[fits_index_to_read]
+
+    # Step 1: let's make a data frame
+    data = pd.DataFrame()
+
+    if new_column_names is None:
+        new_column_names = columns_to_keep
+
+    # We cycle over the fits file, also doing byte shit as they seem to be wrong otherwise
+    for new_key, old_key in zip(new_column_names, columns_to_keep):
+        data[new_key] = fits_file.data[old_key].byteswap().newbyteorder()
+
+    # Step 2: make fresh lists of the flux and error keys, if requested
+    if get_flux_and_error_keys:
+        flux_list = []
+        error_list = []
+
+        for a_string in new_column_names:
+
+            if 'f_' in a_string:
+                flux_list.append(a_string)
+
+            elif 'e_' in a_string and a_string != 'use_phot':
+                error_list.append(a_string)
+
+        return [data, flux_list, error_list]
+
+    # Or, just return data
+    else:
+        return data
 
 
 def where_valid_redshifts(redshift_1, redshift_2=None, validity_condition: str='greater_than_zero'):
@@ -261,59 +314,8 @@ def fit_normal(x_range, y_range):
     return my_params
 
 
-def read_fits(fits_file_location: str, keys_to_keep: list, fits_index_to_read: int=0, new_key_names: bool=None,
-              get_flux_and_error_keys: bool=False):
-    """Creates a new photometry table in the pandas framework given a fits file, a set of keys to keep and new names for 
-    them. By creating a new object, it's nicer and also not read-only.
-
-    Args:
-        fits_file_location (location of an astropy BinTableHDU object): table to read in.
-        keys_to_keep (list of str): keys to bother keeping from the read table.
-        fits_index_to_read (int): index of the fits file to read in. Default is 1 (0 is usually a header.)
-        new_key_names (None or list of str): new key names to assign to elements.
-        get_flux_and_error_keys (bool): whether or not to look for flux and error keys and return them.
-
-    Returns:
-        A list, containing:
-            0. a scrumptuous and lovely pandas data frame.
-            1. a list of all the keys corresponding to flux (aka feed for a neural net.)
-            2. a list of all the keys corresponding to error (aka more feed for a neural net.)
-
-    """
-    # Step 0: read in the fits file
-    fits_file = fits.open(fits_file_location)[fits_index_to_read]
-
-    # Step 1: let's make a data frame
-    data = pd.DataFrame()
-
-    if new_key_names is None:
-        new_key_names = keys_to_keep
-
-    # We cycle over the fits file, also doing byte shit as they seem to be wrong otherwise
-    for new_key, old_key in zip(new_key_names, keys_to_keep):
-        data[new_key] = fits_file.data[old_key].byteswap().newbyteorder()
-
-    # Step 2: make fresh lists of the flux and error keys, if requested
-    if get_flux_and_error_keys:
-        flux_list = []
-        error_list = []
-
-        for a_string in new_key_names:
-
-            if 'f_' in a_string:
-                flux_list.append(a_string)
-
-            elif 'e_' in a_string and a_string != 'use_phot':
-                error_list.append(a_string)
-
-        return [data, flux_list, error_list]
-
-    # Or, just return data
-    else:
-        return data
-
-
-def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, coverage_minimum: float=0.95, verbose: bool=True,
+def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list,
+                                     band_central_wavelengths: list, coverage_minimum: float=0.95,
                                      valid_photometry_column: str='use_phot', z_spec_column: str='z_spec',
                                      missing_flux_handling: Optional[str]=None,
                                      missing_error_handling: Optional[str]=None):
@@ -322,9 +324,10 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
 
     Args:
         data (pd.DataFrame): data frame to act on.
-        columns_to_check (list of str): columns in the data frame to check.
+        flux_keys (list of str): flux keys in the data frame to check.
+        error_keys (list of str): error keys in the data frame to check.
+        band_central_wavelengths (list of floats): central wavelengths of the filter bands.
         coverage_minimum (float): required amount of coverage in a column to keep it.
-        verbose (bool): controls how much we print. True prints moaaar.
         valid_photometry_column (str): name of a column that specifies rows that aren't for some reason screwed up.
         z_spec_column (str): name of the column of spectroscopic redshifts.
         missing_flux_handling (None or str): method to use to replace missing flux points.
@@ -334,11 +337,14 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
         A list containing data that has valid spectroscopic redshifts (0th element) and data without valid
         spectroscopic redshifts (1st element).
     """
+    # Make sure we're using local copies of the flux and error keys
+    flux_keys = flux_keys.copy()
+    error_keys = error_keys.copy()
+
     # Have a look at how many good values are in all columns
     all_columns_to_check = flux_keys + error_keys
     column_coverage = np.zeros(len(all_columns_to_check), dtype=np.float)
     columns_to_remove = []
-    original_length = data.shape[0]
 
     # Check everything, by looking at:
     # 1. Whether or not they're affected by poor photometry/are stars (use_phot does both of these things)
@@ -359,25 +365,21 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
     # Step 2: Remove any columns with very poor coverage, as they aren't worth our time potentially
     # Cycle over columns looking at their coverage: first for fluxes, then almost the same again for errors (except we
     # only record the column coverages once, for flux keys)
-    for column_i, a_column in enumerate(flux_keys):
-        column_coverage[column_i] = \
-            np.where(data[a_column] > -99.0)[0].size / data.shape[0]
+    for band_i, (a_flux_key, a_error_key) in enumerate(zip(flux_keys, error_keys)):
+        column_coverage[band_i] = \
+            np.where(data[a_flux_key] > -99.0)[0].size / data.shape[0]
 
         # Add the column to the naughty list if it isn't good enough
-        if column_coverage[column_i] < coverage_minimum:
-            columns_to_remove.append(a_column)
-        flux_keys.remove(a_column)
+        if column_coverage[band_i] < coverage_minimum:
+            columns_to_remove.append(a_flux_key)
+            columns_to_remove.append(a_error_key)
 
-    for column_i, a_column in enumerate(error_keys):
-        a_column_coverage = np.where(data[a_column] > -99.0)[0].size / data.shape[0]
-
-        # Add the column to the naughty list if it isn't good enough
-        if a_column_coverage < coverage_minimum:
-            columns_to_remove.append(a_column)
-        error_keys.remove(a_column)
+        flux_keys.remove(a_flux_key)
+        error_keys.remove(a_error_key)
+        band_central_wavelengths.pop(band_i)
 
     print('{} out of {} columns do not have coverage over {}% on good sources.'
-          .format(len(columns_to_remove), len(all_columns_to_check), coverage_minimum * 100))
+          .format(len(columns_to_remove), len(flux_keys), coverage_minimum * 100))
     print('These were: {}'
           .format(columns_to_remove))
 
@@ -396,13 +398,18 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
     # Method two: set missing points to the mean value of that row.
     elif missing_flux_handling == 'row_mean':
         print('Dealing with missing data by setting it to the mean of rows...')
-        # Take the mean of each row, then reshape it into a vertical array and make it horizontally as wide as the
-        # number of flux rows
-        row_means = np.mean(np.asarray(data[flux_keys]), axis=1)
-        row_means = np.repeat(row_means.reshape(-1, 1), len(flux_keys), axis=1)
-
         # Grab the fluxes that need fixing and make the fixeyness happen!
         fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
+
+        # Set bad values to np.nan before taking means so the mean ignores them
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=np.nan)
+
+        # Take the mean of each row, then reshape it into a vertical array and make it horizontally as wide as the
+        # number of flux rows
+        row_means = np.nanmean(np.asarray(data[flux_keys]), axis=1)
+        row_means = np.repeat(row_means.reshape(-1, 1), len(flux_keys), axis=1)
+
+        # Assign the new values
         data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=row_means)
         print('{} of {} fluxes were modified.'
               .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
@@ -410,15 +417,106 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
     # Method three: set missing points to the mean value of that column.
     elif missing_flux_handling == 'column_mean':
         print('Dealing with missing data by setting it to the mean of columns...')
-        # Take the mean of each column, then stretch it to be as long as the data itself
-        column_means = np.mean(np.asarray(data[flux_keys]), axis=0)
-        column_means = np.repeat(column_means.reshape(1, -1), data.shape[0], axis=0)
-
         # Grab the fluxes that need fixing and make the fixeyness happen!
         fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
+
+        # Set bad values to np.nan before taking means so the mean ignores them
+        #data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=np.nan)
+
+        # Take the mean of each column (nanmean ignores bad values), then stretch it to be as long as the data itself
+        column_means = np.nanmean(np.asarray(data[flux_keys]), axis=0)
+        column_means = np.repeat(column_means.reshape(1, -1), data.shape[0], axis=0)
+
+        # Assign the new values
         data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=column_means)
         print('{} of {} fluxes were modified.'
               .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
+
+    # Method four: set missing points to the mean value of that column, but normalised with the help of row means.
+    elif missing_flux_handling == 'normalised_column_mean':
+        print('Dealing with missing data by setting it to the row-normalised mean of columns...')
+        # Grab the fluxes that need fixing and make the fixeyness happen!
+        fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
+
+        # Set bad values to np.nan before taking means so the mean ignores them
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=np.nan)
+
+        # Take the mean of each column, then stretch it to be as long as the data itself (and grab the overall mean too)
+        column_means = np.nanmean(np.asarray(data[flux_keys]), axis=0)
+        overall_mean = np.nanmean(column_means)
+        column_means = np.repeat(column_means.reshape(1, -1), data.shape[0], axis=0)
+
+        # Take the mean of each row, then reshape it into a vertical array and make it horizontally as wide as the
+        # number of flux rows
+        row_means = np.nanmean(np.asarray(data[flux_keys]), axis=1)
+        row_means = np.repeat(row_means.reshape(-1, 1), len(flux_keys), axis=1)
+
+        normalised_means = column_means + row_means - overall_mean
+
+        # Assign the new values
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=normalised_means)
+        print('{} of {} fluxes were modified.'
+              .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
+
+    # Method five: interpolate linearly between neighbouring bands.
+    elif missing_flux_handling == 'linear_interpolation':
+        if band_central_wavelengths is None:
+            raise ValueError('interpolation activated yet no band central wavelengths were provided!')
+
+        print('Dealing with missing data by interpolating between points...')
+
+        changed_fluxes = 0
+        rows_to_drop = np.array([])
+
+        # Loop over all the different flux keys and interpolate
+        for band_i, a_flux_key in enumerate(flux_keys):
+
+            sys.stdout.write('\rInterpolating on band {}...'.format(band_i))
+            sys.stdout.flush()
+
+            # Correct for if we're at the start and work out the next and previous bands
+            if band_i == 0:
+                next_band = 2
+                prev_band = 1
+            elif band_i == len(flux_keys) - 1:
+                next_band = band_i - 1
+                prev_band = band_i - 2
+            else:
+                next_band = band_i + 1
+                prev_band = band_i - 1
+
+            # Grab some bits and bobs
+            next_flux_key = flux_keys[next_band]
+            prev_flux_key = flux_keys[prev_band]
+            a_band_wave = band_central_wavelengths[band_i]
+            next_band_wave = band_central_wavelengths[next_band]
+            prev_band_wave = band_central_wavelengths[prev_band]
+
+            # Work out which fluxes we need to fix
+            fluxes_to_fix = np.where(data[a_flux_key] == -99.0, False, True)
+            new_flux_truths = np.invert(fluxes_to_fix)
+            changed_fluxes += np.count_nonzero(new_flux_truths)
+
+            # Do linear y=mx + c interpolation on each point where necessary and store the result
+            new_flux_values = np.where(new_flux_truths,
+                                       (data[next_flux_key] - data[prev_flux_key]) / (next_band_wave - prev_band_wave)
+                                       * a_band_wave + data[next_flux_key]
+                                       - (data[next_flux_key] - data[prev_flux_key]) / (next_band_wave - prev_band_wave)
+                                       * next_band_wave, 0.0)
+            data[a_flux_key] = data[a_flux_key].where(fluxes_to_fix, other=new_flux_values)
+
+            # Find and later remove any rows that have two consecutive missing values
+            rows_to_drop = np.append(rows_to_drop, np.where(
+                np.logical_or(np.logical_and(data[next_flux_key] == -99.0, new_flux_truths),
+                              np.logical_and(data[prev_flux_key] == -99.0, new_flux_truths))))[0]
+
+        old_row_number = data.shape[0]
+        rows_to_drop = np.unique(rows_to_drop)
+        data = data.drop(index=rows_to_drop).reset_index(drop=True)
+
+        print('\n{} of {} fluxes were modified.'.format(changed_fluxes, data.shape[0] * len(flux_keys)))
+        print('{} of {} rows had to be removed due to consecutive disallowed values.'
+              .format(rows_to_drop.size, old_row_number))
 
     else:
         raise ValueError('specified missing_flux_handling not found/implemented/supported.')
@@ -433,8 +531,8 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
 
     elif missing_error_handling == 'big_value':
         print('Dealing with missing errors by setting them to a large value...')
-        # Set it to 100 times the maximum error in the catalogue
-        the_big_number = np.max(np.asarray(data[error_keys])) * 100
+        # Set it to 1000 times the maximum error in the catalogue
+        the_big_number = np.max(np.asarray(data[error_keys])) * 1000
 
         # Grab the fluxes that need fixing and make the fixeyness happen!
         errors_to_fix = np.where(data[error_keys] == -99.0, False, True)
@@ -454,62 +552,60 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, co
     return [data_spec_z, data_no_spec_z, flux_keys, error_keys]
 
 
-"""
+def convert_to_log_sn_errors(data, flux_keys, error_keys):
+    """Function for re-scaling errors to be in log signal to noise ratio space, which ought to be better to train on.
 
-    if check == 'not_minus_99':
-        # Reduce to everything that's got spectroscopic redshifts
-        rows_to_remove_no_spec = np.where(data)
+    Args:
+        data (pd.DataFrame): dataframe to act on.
+        flux_keys (list of str): list of flux keys, in order.
+        error_keys (list of str): list of error keys, in the same order as flux_keys..
 
-        # Check for rows that are actually stars...
-        rows_to_remove_are_stars = np.where(data[star_column] == 1)[0]
-        rows_to_keep_are_stars = np.where(data[star_column] != 1)[0]
-
-        # Check for rows that have a bad photometry flag
-        rows_to_remove_bad_phot = np.where(data[valid_photometry_column].iloc[rows_to_keep_are_stars] != 1)[0]
-        rows_to_keep_bad_phot = np.where(data[valid_photometry_column].iloc[rows_to_keep_are_stars] == 1)[0]  # todo: fuck, you're lazy...
-
-        # Cycle over columns looking at their coverage
-        for column_i, a_column in enumerate(columns_to_check):
-            column_coverage[column_i] = \
-                np.where(data[a_column].iloc[rows_to_keep_bad_phot] > -99.0)[0].size / total_length
-
-            # Add the column to the naughty list if it isn't good enough
-            if column_coverage[column_i] < coverage_minimum:
-                columns_to_remove.append(a_column)
-            else:
-                columns_to_keep.append(a_column)
-
-        # Now, check look for bad rows that still have missing data. We do a massive np.where check across the whole
-        # array, then look for instances of True (where the condition isn't satisfied), then work out indeces of rows
-        # with more than one offender.
-        rows_to_remove_incomplete_phot = np.where(np.count_nonzero(
-            np.where(data[columns_to_keep].iloc[rows_to_keep_bad_phot] > -99.0, False, True), axis=1) > 0)[0]
-
-    else:
-        raise ValueError('specified check not implemented.')
-
-    if verbose:
-        print('I have checked the coverage of the data. I found that:')
-        print('{} of {} rows have a star flag and are not included.'
-              .format(rows_to_remove_are_stars.size, total_length))
-        print('{} of {} rows had a bad photometry warning flag and are not included.'
-              .format(rows_to_remove_bad_phot.size, data[columns_to_keep].iloc[rows_to_keep_are_stars].shape[0]))
-        print('{} out of {} columns do not have coverage over {}% on good sources.'
-              .format(len(columns_to_remove), len(columns_to_check), coverage_minimum * 100))
-        print('These were: {}'
-              .format(columns_to_remove))
-        print('I also found that {} of {} rows would still have invalid values even after removing all the above.'
-              .format(rows_to_remove_incomplete_phot.size, data[columns_to_keep].iloc[rows_to_keep_bad_phot].shape[0]))
-        print('This leaves a total of {:.2f}% of initial rows in the final data set.'
-              .format(100 * (1 - (rows_to_remove_incomplete_phot.size + rows_to_remove_bad_phot.size
-                                  + rows_to_remove_are_stars.size) / total_length)))
-
-    return [columns_to_keep, columns_to_remove,
-            rows_to_remove_are_stars, rows_to_remove_bad_phot, rows_to_remove_incomplete_phot]
-            
+    Returns:
+        The edited data frame :)
     """
+    # Cycle over all the bands and convert them to log signal to noise
+    for a_flux_key, a_error_key in zip(flux_keys, error_keys):
+
+        # Check we haven't been passed any incorrect values (that would fuck everything right up lol)
+        bad_fluxes = np.count_nonzero(np.where(data[a_flux_key] == -99., True, False))
+        if bad_fluxes > 0:
+            raise ValueError('some fluxes in band {} were invalid!'.format(a_flux_key))
+
+        # We only divide when the errors aren't zero. Otherwise, we set it to the maximum signal to noise ratio.
+        sig_noise = np.where(data[a_error_key] != 0.0, data[a_flux_key] / data[a_error_key], -1.)
+        sig_noise = np.where(sig_noise == -1., np.max(sig_noise), sig_noise)
+
+        # Take the log and save it =)
+        log_sig_noise = np.log(sig_noise)
+
+        # Set any pathetically small values from 0 signal to noise to a smol number
+        log_sig_noise = np.where(log_sig_noise == -np.inf, -700., log_sig_noise)
+
+        data[a_error_key] = log_sig_noise
+
+    return data
 
 
+def convert_to_log_fluxes(data, flux_keys):
+    """Converts fluxes to log fluxes (plus their minimum value to avoid nans.) Can help to make the flux distribution
+    more Gaussian, which may help with training. Has checks to ensure it doesn't take log of 0 or less!
 
+    Args:
+        data (pd.DataFrame): dataframe to act on.
+        flux_keys (list of str): list of flux keys, in order.
 
+    Returns:
+        The edited data frame :)
+    """
+    # Cycle over flux bands
+    for a_flux_key in flux_keys:
 
+        # Check we haven't been passed any incorrect values (that would fuck the log right up lol)
+        bad_fluxes = np.count_nonzero(np.where(data[a_flux_key] == -99., True, False))
+        if bad_fluxes > 0:
+            raise ValueError('some fluxes in band {} were invalid!'.format(a_flux_key))
+
+        # Set the minimum to 0.0001 and take a log
+        data[a_flux_key] = np.log(data[a_flux_key] - np.min(data[a_flux_key] + 0.0001))
+
+    return data

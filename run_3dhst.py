@@ -16,7 +16,7 @@ from sklearn.model_selection import train_test_split
 
 # Begin by reading in the data
 data = util.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_goodss_config.keys_to_keep,
-                      new_key_names=None, get_flux_and_error_keys=False)
+                      new_column_names=None, get_flux_and_error_keys=False)
 
 archival_redshifts = util.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
 
@@ -30,21 +30,18 @@ band_central_wavelengths = hst_goodss_config.band_central_wavelengths
 
 # Take a look at the coverage in different photometric bands
 data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
-    util.check_photometric_coverage_3dhst(data, flux_keys, error_keys, coverage_minimum=0.95,
+    util.check_photometric_coverage_3dhst(data, flux_keys, error_keys, band_central_wavelengths,
+                                          coverage_minimum=0.5,
                                           valid_photometry_column='use_phot',
-                                          missing_flux_handling='column_mean',
+                                          missing_flux_handling='normalised_column_mean',
                                           missing_error_handling='big_value')
 
-"""Returned on 19/11/18 with coverage_minimum at 0.6:
-I have checked the coverage of the data. I found that:
-10509 of 50507 rows had a bad photometry warning flag and are not included.
-4 out of 80 columns do not have coverage over 60.0% on good sources.
-These were: ['f_f606wcand', 'f_h', 'e_f606wcand', 'e_h']
-I also found that 15831 of 39998 rows would still have invalid values even after removing all the above.
-This leaves 47.85% of rows in the final data set.
-!!! Before setting the stars flag, 66 sources in this final set were stars!!!
-"""
+#data_with_spec_z = util.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
+data_with_spec_z2 = util.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
 
+#data_no_spec_z = util.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
+#data_no_spec_z = util.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
+"""
 keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]
 
 x = np.asarray(data_with_spec_z[keys_in_order])
@@ -54,8 +51,8 @@ y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
 x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
 
 # Make a network
-run_super_name = '18-11-26_cdf_lossfunc'
-run_name = 'test_22_showing_damon'
+run_super_name = '18-11-29_a_tuning_interlude'
+run_name = '20_ncm_50cov_log_fluxes'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'
 
@@ -72,7 +69,7 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + 
                                     y_scaling='min_max',
                                     x_features=x_train.shape[1],
                                     y_features=1,
-                                    layer_sizes=[30, 30, 20],
+                                    layer_sizes=[20, 20, 10],
                                     mixture_components=5,
                                     learning_rate=1e-3)
 
@@ -98,12 +95,12 @@ z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=T
                     plt_title=run_name)
 
 valid_map_values = util.where_valid_redshifts(validation_results['map'])
-z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], validation_results['map'][valid_map_values],
-                       validation_results['lower'][valid_map_values], validation_results['upper'], show_fig=True,
-                       save_name=run_dir + 'errors.png',
-                       plt_title=run_name)
+#z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], validation_results['map'][valid_map_values],
+#                       validation_results['lower'][valid_map_values], validation_results['upper'], show_fig=True,
+#                       save_name=run_dir + 'errors.png',
+#                       plt_title=run_name)
 
-"""
+""
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
