@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+from astropy.io import fits
 from scipy.io.idl import readsav as scipy_readsav
 from scipy.optimize import curve_fit
 from scipy.stats import norm
@@ -260,15 +261,17 @@ def fit_normal(x_range, y_range):
     return my_params
 
 
-def make_3dhst_photometry_table(hdu_table, keys_to_keep, new_key_names=None):  # todo: doesn't make sense that this isn't like read_save. Should change to be like that instead.
-    """Creates a new photometry table in the pandas framework given a set of keys to keep and new names for them. By
-    creating a new object, it's nicer and also not read-only. You should delete the hdu_table after calling this if you
-    don't need it anymore.
+def read_fits(fits_file_location: str, keys_to_keep: list, fits_index_to_read: int=0, new_key_names: bool=None,
+              get_flux_and_error_keys: bool=False):
+    """Creates a new photometry table in the pandas framework given a fits file, a set of keys to keep and new names for 
+    them. By creating a new object, it's nicer and also not read-only.
 
     Args:
-        hdu_table (astropy BinTableHDU object): table to read in.
+        fits_file_location (location of an astropy BinTableHDU object): table to read in.
         keys_to_keep (list of str): keys to bother keeping from the read table.
+        fits_index_to_read (int): index of the fits file to read in. Default is 1 (0 is usually a header.)
         new_key_names (None or list of str): new key names to assign to elements.
+        get_flux_and_error_keys (bool): whether or not to look for flux and error keys and return them.
 
     Returns:
         A list, containing:
@@ -277,28 +280,37 @@ def make_3dhst_photometry_table(hdu_table, keys_to_keep, new_key_names=None):  #
             2. a list of all the keys corresponding to error (aka more feed for a neural net.)
 
     """
+    # Step 0: read in the fits file
+    fits_file = fits.open(fits_file_location)[fits_index_to_read]
+
     # Step 1: let's make a data frame
     data = pd.DataFrame()
 
     if new_key_names is None:
         new_key_names = keys_to_keep
 
+    # We cycle over the fits file, also doing byte shit as they seem to be wrong otherwise
     for new_key, old_key in zip(new_key_names, keys_to_keep):
-        data[new_key] = hdu_table.data[old_key].byteswap().newbyteorder()
+        data[new_key] = fits_file.data[old_key].byteswap().newbyteorder()
 
-    # Step 2: make fresh lists of the flux and error keys
-    flux_list = []
-    error_list = []
+    # Step 2: make fresh lists of the flux and error keys, if requested
+    if get_flux_and_error_keys:
+        flux_list = []
+        error_list = []
 
-    for a_string in new_key_names:
+        for a_string in new_key_names:
 
-        if 'f_' in a_string:
-            flux_list.append(a_string)
+            if 'f_' in a_string:
+                flux_list.append(a_string)
 
-        elif 'e_' in a_string and a_string != 'use_phot':
-            error_list.append(a_string)
+            elif 'e_' in a_string and a_string != 'use_phot':
+                error_list.append(a_string)
 
-    return [data, flux_list, error_list]
+        return [data, flux_list, error_list]
+
+    # Or, just return data
+    else:
+        return data
 
 
 def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list, coverage_minimum: float=0.95, verbose: bool=True,

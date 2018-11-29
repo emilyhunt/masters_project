@@ -4,7 +4,6 @@ import numpy as np
 import os
 import pandas as pd
 import time
-from astropy.io import fits
 from scripts import mdn
 from scripts import loss_funcs
 from scripts import z_plot
@@ -16,16 +15,18 @@ from sklearn.model_selection import train_test_split
 
 
 # Begin by reading in the data
-fits_file = fits.open('./data/goodss_3dhst.v4.1.cat.FITS')
-
-data, flux_keys, error_keys = util.make_3dhst_photometry_table(fits_file[1], hst_goodss_config.keys_to_keep,
-                                                               new_key_names=None)
+data = util.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_goodss_config.keys_to_keep,
+                      new_key_names=None, get_flux_and_error_keys=False)
 
 archival_redshifts = util.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
 
 data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68']] = \
     archival_redshifts[['gs4_zspec', 'gs4_zphot', 'gs4_zphot_l68', 'gs4_zphot_u68']]
 
+# Get some useful things from the config file
+flux_keys = hst_goodss_config.flux_keys_in_order
+error_keys = hst_goodss_config.error_keys_in_order
+band_central_wavelengths = hst_goodss_config.band_central_wavelengths
 
 # Take a look at the coverage in different photometric bands
 data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
@@ -54,7 +55,7 @@ x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=4
 
 # Make a network
 run_super_name = '18-11-26_cdf_lossfunc'
-run_name = 'test_20_normal_pdf_faster'
+run_name = 'test_22_showing_damon'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'
 
@@ -63,12 +64,12 @@ try:
 except FileExistsError:
     print('Not making a new directory because it already exists. I hope you changed the name btw!')
 
-loss_function = loss_funcs.NormalPDFLoss()
+loss_function = loss_funcs.BetaPDFLoss()
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
                                     x_scaling='standard',
-                                    y_scaling=None,
+                                    y_scaling='min_max',
                                     x_features=x_train.shape[1],
                                     y_features=1,
                                     layer_sizes=[30, 30, 20],
