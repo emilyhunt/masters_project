@@ -22,7 +22,8 @@ class MixtureDensityNetwork:
 
     def __init__(self, loss_function, summary_directory: str, regularization: Optional[str]=None, regularization_scale=0.1,
                  x_features: int=1, y_features: int=1, x_scaling: Optional[str]=None, y_scaling: Optional[str]=None,
-                 layer_sizes=15, mixture_components: int=5, learning_rate=0.001) -> None:
+                 layer_sizes=15, mixture_components: int=5, learning_rate=0.001, convolution_layer: bool=False,
+                 convolution_window_size: int=5, convolution_stride: int=1) -> None:
         """Initialises a mixture density network in tensorflow given the specified (or default) parameters.
 
         Args:
@@ -42,7 +43,6 @@ class MixtureDensityNetwork:
         hidden_layers = layer_sizes.size
 
         # Create a tensorflow graph for this class
-
         with tf.name_scope('graph'):
             self.graph = tf.Graph()
             self.graph_output_names = loss_function.coefficient_names
@@ -54,7 +54,11 @@ class MixtureDensityNetwork:
 
             # Placeholders for input data
             with tf.variable_scope('data'):
-                self.x_placeholder = tf.placeholder(tf.float32, [None, x_features], name='x')
+
+                if convolution_layer:
+                    self.x_placeholder = tf.placeholder(tf.float32, [None, x_features, 1], name='x')
+                else:
+                    self.x_placeholder = tf.placeholder(tf.float32, [None, x_features], name='x')
                 self.y_placeholder = tf.placeholder(tf.float32, [None, y_features], name='y')
 
             # Decide on the type of weight co-efficient regularisation to use based on what the user specified
@@ -77,11 +81,22 @@ class MixtureDensityNetwork:
             with tf.variable_scope('hidden_layers'):
                 self.graph_layers = []
 
-                # Join layers to x data
-                self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i],
-                                                          activation=tf.nn.tanh,
-                                                          kernel_regularizer=self.regularisation_function,
-                                                          name='hidden_layer_1'))
+                # Join layers to x data, with a convolution layer if specified
+                if convolution_layer:
+                    # We 'squeeze' the conv layer to get rid of the last dimension
+                    self.graph_layers.append(tf.layers.flatten(
+                        tf.layers.conv1d(self.x_placeholder, layer_sizes[i],
+                                         [convolution_window_size],
+                                         strides=convolution_stride,
+                                         activation=tf.nn.tanh,
+                                         kernel_regularizer=self.regularisation_function,
+                                         name='hidden_layer_1_convolution'),
+                        name='convolution_layer_flattening'))
+                else:
+                    self.graph_layers.append(tf.layers.dense(self.x_placeholder, layer_sizes[i],
+                                                             activation=tf.nn.tanh,
+                                                             kernel_regularizer=self.regularisation_function,
+                                                             name='hidden_layer_1'))
 
                 # Join layers to each other from here on out
                 i += 1
@@ -152,6 +167,9 @@ class MixtureDensityNetwork:
         self.exit_reason = None
         self.training_success = True
 
+        # Store some deets about the conv layer
+        self.convolution_layer = convolution_layer
+
         # Initialise scalers for the x and y data. We keep these with the class because it means that
         if x_scaling is 'min_max':
             self.x_scaler = MinMaxScaler(feature_range=(0.1, 0.9))  # todo: feature ranges are hard coded!
@@ -209,6 +227,10 @@ class MixtureDensityNetwork:
         # Keep an idea of what the maximum and minimum training data range is. This is helpful for plotting later.
         self.y_data_range = [y_data.min(), y_data.max()]
 
+        # Set an extra dimension in the data if we're using a convolution layer
+        if self.convolution_layer:
+            x_data = np.expand_dims(x_data, axis=2)
+
         # Add the new x_data, y_data
         self.training_data = {self.x_placeholder: x_data, self.y_placeholder: y_data}
 
@@ -226,6 +248,10 @@ class MixtureDensityNetwork:
         # Scale the y data if requested, using the same scaling parameters as the training data
         #if self.y_scaler is not None:
         #    y_data = self.y_scaler.transform(y_data)  todo: does this need ydata??!?!?
+
+        # Set an extra dimension in the data if we're using a convolution layer
+        if self.convolution_layer:
+            x_data = np.expand_dims(x_data, axis=2)
 
         # Add the new x_data, y_data
         self.validation_data = {self.x_placeholder: x_data} #, self.y_placeholder: y_data}

@@ -12,7 +12,20 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+30/11/18
+- Added convolutional layers in the beginning of a fun time
+- Began re-investigating the CDF lossfunc
 
+~~ Info on different conv tests ~~
+- Tanh activation seems better than relu still
+- Conv layers offer a *marginal* improvement (that might just be from longer runtime tbh...)
+- Test 6 (filter size 8, stride 4) worked the best! It beat its control by 15%.
+- Hilariously, normal distributions are better still! (See test 11) yet without a convolutional layer, are a decent bit (25%) worse than beta distributions.
+
+~~ Info on CDF tests ~~
+- CDF lossfunc seems to vaaaguely help
+- But ultimately, it becomes degenerate with a reduction in MAP accuracy before being helpful enough to improve PDF validity (test 17)
+- Test 18 & 19 refactored to have the multiplier inside the log, but this seems to be a bad idea?! Doesn't seem to actually give enough onus on learning (duuuuhhh, since alog(b) == log(b^a) but log(a*b) == log(a) + log(b), aka the second one is just an offset)
 
 
 29/11/18
@@ -24,6 +37,14 @@ Stuff I could do:
 - Robust scaling is indeedy a bit shite, and causes horizontal lines
 - Not removing any columns at all is a Good Idea
 - Normalised column mean has a marginally higher NMAD but marginally fewer outliers - test 14
+- Log fluxes improves things
+- Running without any errors at all is better... test 23
+- Best missing data handling in order is:
+	1. Row-normalised column means
+	2. Linear interpolation
+	3. Column means
+	4. Row means
+	5. Removing galaxies with missing data
 
 ---- Week IX ----
 

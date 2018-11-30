@@ -421,7 +421,7 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list,
         fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
 
         # Set bad values to np.nan before taking means so the mean ignores them
-        #data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=np.nan)
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=np.nan)
 
         # Take the mean of each column (nanmean ignores bad values), then stretch it to be as long as the data itself
         column_means = np.nanmean(np.asarray(data[flux_keys]), axis=0)
@@ -545,8 +545,8 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list,
 
     # Step 4: Split the data into sets with and without spectroscopic redshifts
     has_spec_z = np.where(np.asarray(data[z_spec_column]) != -99.0)[0]
-    data_spec_z = data.iloc[has_spec_z].reset_index(drop=True)
-    data_no_spec_z = data.drop(index=has_spec_z).reset_index(drop=True)
+    data_spec_z = data.iloc[has_spec_z].copy().reset_index(drop=True)
+    data_no_spec_z = data.drop(index=has_spec_z).copy().reset_index(drop=True)
     print('{} out of {} galaxies have spectroscopic redshifts.'.format(has_spec_z.size, data.shape[0]))
 
     return [data_spec_z, data_no_spec_z, flux_keys, error_keys]
@@ -563,6 +563,9 @@ def convert_to_log_sn_errors(data, flux_keys, error_keys):
     Returns:
         The edited data frame :)
     """
+    # Make sure we aren't being naughty and assigning things to the wrong data frame
+    #data = data.copy()
+
     # Cycle over all the bands and convert them to log signal to noise
     for a_flux_key, a_error_key in zip(flux_keys, error_keys):
 
@@ -575,8 +578,8 @@ def convert_to_log_sn_errors(data, flux_keys, error_keys):
         sig_noise = np.where(data[a_error_key] != 0.0, data[a_flux_key] / data[a_error_key], -1.)
         sig_noise = np.where(sig_noise == -1., np.max(sig_noise), sig_noise)
 
-        # Take the log and save it =)
-        log_sig_noise = np.log(sig_noise)
+        # Take the log and save it, being careful to not take a log of a negative number if there are any.
+        log_sig_noise = np.log(sig_noise - np.min(sig_noise) + 0.0001)
 
         # Set any pathetically small values from 0 signal to noise to a smol number
         log_sig_noise = np.where(log_sig_noise == -np.inf, -700., log_sig_noise)
@@ -597,6 +600,9 @@ def convert_to_log_fluxes(data, flux_keys):
     Returns:
         The edited data frame :)
     """
+    # Make sure we aren't being naughty and assigning things to the wrong data frame
+    #data = data.copy()
+
     # Cycle over flux bands
     for a_flux_key in flux_keys:
 
@@ -606,6 +612,6 @@ def convert_to_log_fluxes(data, flux_keys):
             raise ValueError('some fluxes in band {} were invalid!'.format(a_flux_key))
 
         # Set the minimum to 0.0001 and take a log
-        data[a_flux_key] = np.log(data[a_flux_key] - np.min(data[a_flux_key] + 0.0001))
+        data[a_flux_key] = np.log(data[a_flux_key] - np.min(data[a_flux_key]) + 0.0001)
 
     return data

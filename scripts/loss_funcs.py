@@ -441,12 +441,15 @@ class BetaCDFLoss:
 
 class NormalCDFLoss:
 
-    def __init__(self):
+    def __init__(self, cdf_strength: float=0.1):
         """Creates a normal distribution implemented in tensorflow notation.
         You may wish to access:
             - self.activation_functions: a list of activation functions that should be used with the mixture arguments,
                                          applied to layers.
             - self.coefficient_names: a list of the names of each mixture coefficient.
+
+        Args:
+            - error_strength (float): strength of the error test in this lossfunc.
         """
         # Names of and activation functions to apply to each output layer.
         self.coefficient_names = ['weights', 'means', 'std_deviations']
@@ -459,6 +462,9 @@ class NormalCDFLoss:
 
         # A useful constant to keep around
         self.one_div_sqrt_two_pi = np.float64(1 / np.sqrt(2 * np.pi))
+
+        # Store variables for later
+        self.error_strength = cdf_strength
 
     def tensor_evaluate(self, true_values, coefficients):
         """Lossfunc defined in tensorflow notation.
@@ -489,7 +495,8 @@ class NormalCDFLoss:
             summed_cdfs = tf.divide(summed_cdfs, summed_cdfs[-1])
 
             # Calculate the mean squared residual between summed cdfs and sorted cdfs
-            cdf_residual = tf.reduce_mean(tf.square(tf.subtract(summed_cdfs, sorted_cdfs)))
+            cdf_residual = tf.multiply(tf.reduce_mean(tf.log(tf.cosh(tf.subtract(summed_cdfs, sorted_cdfs)))),
+                                       self.error_strength)
 
             # DISTRIBUTION ACCURACY EVALUATION
             # map_residual = tf.log(tf.reduce_mean(tf.square(tf.subtract(coefficients['means'][:, 0], true_values[:, 0]))))

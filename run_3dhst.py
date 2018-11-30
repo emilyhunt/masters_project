@@ -36,12 +36,12 @@ data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
                                           missing_flux_handling='normalised_column_mean',
                                           missing_error_handling='big_value')
 
-#data_with_spec_z = util.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
-data_with_spec_z2 = util.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
+data_with_spec_z = util.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
+data_with_spec_z = util.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
 
 #data_no_spec_z = util.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
 #data_no_spec_z = util.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
-"""
+
 keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]
 
 x = np.asarray(data_with_spec_z[keys_in_order])
@@ -51,8 +51,8 @@ y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
 x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
 
 # Make a network
-run_super_name = '18-11-29_a_tuning_interlude'
-run_name = '20_ncm_50cov_log_fluxes'
+run_super_name = '18-11-30_the_cdf_improvement_attempt'
+run_name = '21_log_cdfS_4000'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'
 
@@ -61,15 +61,18 @@ try:
 except FileExistsError:
     print('Not making a new directory because it already exists. I hope you changed the name btw!')
 
-loss_function = loss_funcs.BetaPDFLoss()
+loss_function = loss_funcs.NormalCDFLoss(cdf_strength=4000)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
                                     x_scaling='standard',
-                                    y_scaling='min_max',
-                                    x_features=x_train.shape[1],
+                                    y_scaling=None,
+                                    x_features=x_train.shape[-1],
                                     y_features=1,
-                                    layer_sizes=[20, 20, 10],
+                                    convolution_layer=True,
+                                    convolution_window_size=8,
+                                    convolution_stride=4,
+                                    layer_sizes=[20, 20, 20],
                                     mixture_components=5,
                                     learning_rate=1e-3)
 
@@ -95,12 +98,12 @@ z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=T
                     plt_title=run_name)
 
 valid_map_values = util.where_valid_redshifts(validation_results['map'])
-#z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], validation_results['map'][valid_map_values],
-#                       validation_results['lower'][valid_map_values], validation_results['upper'], show_fig=True,
-#                       save_name=run_dir + 'errors.png',
-#                       plt_title=run_name)
+z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], validation_results['map'][valid_map_values],
+                       validation_results['lower'][valid_map_values], validation_results['upper'], show_fig=True,
+                       save_name=run_dir + 'errors.png',
+                       plt_title=run_name)
 
-""
+"""
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
