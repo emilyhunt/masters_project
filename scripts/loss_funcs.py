@@ -13,7 +13,7 @@ import tensorflow as tf
 import numpy as np
 from scipy.stats import norm as scipy_normal
 from scipy.stats import beta as scipy_beta
-from typing import Union
+from typing import Union, Optional
 
 
 class NormalPDFLoss:
@@ -441,7 +441,8 @@ class BetaCDFLoss:
 
 class NormalCDFLoss:
 
-    def __init__(self, cdf_strength: float=0.1):
+    def __init__(self, cdf_strength: float=1.0, std_deviation_strength: float=1.0, grid_size: Optional[int]=None,
+                 redshift_range: tuple=(0, 7), mixtures: int=1):
         """Creates a normal distribution implemented in tensorflow notation.
         You may wish to access:
             - self.activation_functions: a list of activation functions that should be used with the mixture arguments,
@@ -449,7 +450,7 @@ class NormalCDFLoss:
             - self.coefficient_names: a list of the names of each mixture coefficient.
 
         Args:
-            - error_strength (float): strength of the error test in this lossfunc.
+            - error_strength (float): strength of the error test in this lossfunc.  # todo: update me
         """
         # Names of and activation functions to apply to each output layer.
         self.coefficient_names = ['weights', 'means', 'std_deviations']
@@ -464,7 +465,14 @@ class NormalCDFLoss:
         self.one_div_sqrt_two_pi = np.float64(1 / np.sqrt(2 * np.pi))
 
         # Store variables for later
-        self.error_strength = cdf_strength
+        self.cdf_strength = cdf_strength
+        self.std_deviation_strength = std_deviation_strength
+
+        if grid_size is not None:
+            a_grid = np.linspace(redshift_range[0], redshift_range[1], num=grid_size)
+            self.grid = tf.constant()
+        else:
+            self.grid = None
 
     def tensor_evaluate(self, true_values, coefficients):
         """Lossfunc defined in tensorflow notation.
@@ -496,22 +504,44 @@ class NormalCDFLoss:
 
             # Calculate the mean squared residual between summed cdfs and sorted cdfs
             cdf_residual = tf.multiply(tf.reduce_mean(tf.log(tf.cosh(tf.subtract(summed_cdfs, sorted_cdfs)))),
-                                       self.error_strength)
+                                       self.cdf_strength)
 
             # DISTRIBUTION ACCURACY EVALUATION
             # map_residual = tf.log(tf.reduce_mean(tf.square(tf.subtract(coefficients['means'][:, 0], true_values[:, 0]))))
 
-            # Calculate normal distribution mixture and normalise
+            # Calculate normal distribution mixture and normalise against weights
             weighted_pdfs = tf.multiply(distributions.prob(tiled_true_values), coefficients['weights'])
-
-            # Sum the result and take the negative mean
             summed_pdfs = tf.reduce_sum(weighted_pdfs, 1, keepdims=False)
-            mean_log_pdf = tf.reduce_mean(tf.log(summed_pdfs))
+
+            if self.grid is not None:
+                tiled_grid = tf.tile(tf.expand_dims(self.grid, axis=1), [1, tf.shape(coefficients['means'])[1]])
+
+
+            # Work out rough pdf maximums by evaluating at the mean of the most heavily weighted distributions
+            # This is faster than gridding, and hopefully loses ~no accuracy since a grid has a finite accuracy anyway
+            indices = tf.transpose([tf.range(0, tf.shape(coefficients['means'])[0]),
+                                    tf.argmax(coefficients['weights'], axis=1, output_type=tf.int32)])
+            biggest_pdfs = tf.expand_dims(tf.gather_nd(coefficients['means'], indices), axis=1)
+
+            # Tile up the estimates of the pdf maxima and eval them against the distributions
+            tiled_biggest_pdfs = tf.tile(biggest_pdfs, [1, tf.shape(coefficients['means'])[1]])
+            approximate_pdf_max = tf.multiply(distributions.prob(tiled_biggest_pdfs), coefficients['weights'])
+            summed_pdf_maxes = tf.reduce_sum(approximate_pdf_max, 1, keepdims=False)
+
+            # Divide the pdfs by their maximum to make the pdf residuals standard-deviation invariant
+            summed_pdfs = tf.divide(summed_pdfs, summed_pdf_maxes)
+
+            # Sum the result and take the negative mean log
+            mean_log_pdf = tf.reduce_mean(tf.log(tf.cosh(summed_pdfs)))
             pdf_residual = tf.multiply(mean_log_pdf, -1)
 
-            #cdf_residual = tf.constant(1.0)
+            # BIAS AGAINST LARGE STANDARD DEVIATIONS
+            # We sum all of the standard deviations and bias them towards being smaller in a knock-off of a Jeffreys log
+            # uniform prior.
+            mean_sigma_per_object = tf.reduce_mean(coefficients['std_deviations'], axis=1, keepdims=False)
+            sigma_residual = tf.multiply(tf.reduce_mean(tf.log(tf.cosh(mean_sigma_per_object))), self.std_deviation_strength)
 
-            return tf.add(cdf_residual, pdf_residual)
+            return tf.add(sigma_residual, tf.add(cdf_residual, pdf_residual))
 
 
     @staticmethod

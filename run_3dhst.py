@@ -51,8 +51,8 @@ y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
 x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
 
 # Make a network
-run_super_name = '18-11-30_the_cdf_improvement_attempt'
-run_name = '21_log_cdfS_4000'
+run_super_name = '18-12-03_cdf_method_improvements_2'
+run_name = '12_cdfs=0.30_stds=0.3_m=5_logcosh'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'
 
@@ -61,7 +61,7 @@ try:
 except FileExistsError:
     print('Not making a new directory because it already exists. I hope you changed the name btw!')
 
-loss_function = loss_funcs.NormalCDFLoss(cdf_strength=4000)
+loss_function = loss_funcs.NormalCDFLoss(cdf_strength=0.30, std_deviation_strength=0.3)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
@@ -88,7 +88,7 @@ network.set_validation_data(x_validate, y_validate)
 validation_mixtures = network.validate()
 validation_results = network.calculate_validation_stats(validation_mixtures)
 
-network.plot_pdf(validation_mixtures, [10, 100, 200],
+network.plot_pdf(validation_mixtures, [10, 100, 200, 300, 400, 500],
                  map_values=validation_results['map'],
                  true_values=y_validate.flatten(),
                  figure_directory=run_dir)
@@ -137,4 +137,18 @@ z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_ma
 # Initialise twitter
 #twit = twitter.TweetWriter()
 #twit.write(twitter.initial_text('on 3D-HST data with basic settings.'), reply_to=None)
+"""
+
+"""
+plt.figure()
+plt.plot((validation_results['map'] - y_validate.flatten())/(1 + y_validate.flatten()), mean_sn, 'r.', alpha=0.5)
+plt.xlabel(r'$\Delta z / (1 + z_{spec})$')
+plt.ylabel('Mean log(S/N)')
+plt.gca().invert_yaxis()
+plt.xscale('log')
+#plt.yscale('log')
+plt.title('Mean signal to noise vs redshift error')
+#plt.ylim(4, -1)
+plt.show()
+
 """

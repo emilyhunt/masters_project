@@ -12,6 +12,19 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+
+03/12/18
+- Lots of testing and trying to tune the CDF loss, now with PDFs normalised with an estimate of their maximum
+
+~~ Info on CDF loss latest testing round ~~
+- Log cosh loss everywhere seems to be good for stability and the like
+- The cdf test is a bit unstable and I would love if it was better
+- Test 11 seems to be the settings winner so far (NMAD ~0.04)
+
+
+---- Week X ----
+
+
 30/11/18
 - Added convolutional layers in the beginning of a fun time
 - Began re-investigating the CDF lossfunc
