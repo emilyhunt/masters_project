@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import scripts.galaxy_pairs
 from scripts import util
 from typing import Optional
+from scipy.stats import norm as scipy_normal
 
 # Make TeX labels work on plots
 #rc('font', **{'family': 'serif', 'serif': ['Palatino']})
@@ -36,7 +37,7 @@ def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins
             validity_condition (str): validity condition to pass to util.where_valid_redshifts().
             
     Returns:
-        the best plot ever
+        the best plot ever, and also the NMAD
             
     """  # todo this fn needs updating
 
@@ -58,7 +59,8 @@ def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins
 
     # Add the NMAD to the plot if it has been specified by the user
     if show_nmad is True:
-        ax_spec_phot.text(0.05, 0.95, 'NMAD = {:.4f}'.format(util.calculate_nmad(spectroscopic_z, photometric_z)),
+        overall_nmad = util.calculate_nmad(spectroscopic_z, photometric_z)
+        ax_spec_phot.text(0.05, 0.95, 'NMAD = {:.4f}'.format(overall_nmad),
                      ha='left', va='center', transform=ax_spec_phot.transAxes, fontsize=8,
                      bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
 
@@ -139,6 +141,8 @@ def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins
         fig.show()
     else:
         plt.close(fig)
+
+    return overall_nmad
 
 
 def sky_locations(ra, dec):
@@ -388,10 +392,10 @@ def error_evaluator(spectroscopic_z, photometric_z, sigma_1_lower, sigma_1_upper
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
 
-    plt.plot(bin_centres, deviation_in_sigmas_binned, 'k-', label='Data')
-    plt.plot(fit_x_range, fit_y_range, 'r--',
+    ax.plot(bin_centres, deviation_in_sigmas_binned, 'k-', label='Data')
+    ax.plot(fit_x_range, fit_y_range, 'r--',
              label=r'Fit: $\mu=$' + '{:.2f}'.format(params['s_m']) + r', $\sigma=$' + '{:.2f}'.format(params['s_s']))
-    plt.plot(fit_x_range, util.single_normal_to_fit(fit_x_range, 1, 0), 'b--',
+    ax.plot(fit_x_range, util.single_normal_to_fit(fit_x_range, 1, 0), 'b--',
              label=r'Fit: $\mu=0$, $\sigma=1$')
 
     # r'$\mu = $' + '{}'.format(params['s_m'])
@@ -432,6 +436,87 @@ def error_evaluator(spectroscopic_z, photometric_z, sigma_1_lower, sigma_1_upper
         fig.show()
     else:
         plt.close(fig)
+
+
+def error_evaluator_wittman(spectroscopic_z, photometric_mixtures,
+                            plt_title: Optional[str]=None, save_name: Optional[str]=None, show_fig: bool=False,
+                            validity_condition: str='greater_than_zero'):
+    """Makes a histogram evaluating how good the given redshift error estimates are, using the Wittman+2014 method of
+    sorting and summing cdfs instead of using sigma outliers and frequentism.
+
+    CURRENTLY ONLY WORKS WITH NORMAL DISTRIBUTIONS.
+
+    Args:
+        Function-specific:
+            spectroscopic_z (array-like): true redshifts to test against.
+            photometric_z (array-like): inferred redshifts to test.
+            sigma_1_lower (array-like): lower bounds on redshifts. Should be a positive
+            sigma_1_upper (array-like): upper bounds on redshifts. Set to None, this will be a copy of sigma_1_low (useful
+                for if error estimates are symmetrical.)
+            limits (array-like): x limits for the plot.
+            # todo rewrite this shite
+
+        Module-common:
+            plt_title (None or bool): title for the plot.
+            save_name (None or str): name of plot to save.
+            show_fig (bool): whether or not to show the plot.
+            validity_condition (str): validity condition to pass to util.where_valid_redshifts().
+
+    Returns:
+        A gorgeous plot
+    """
+    # Just in case you passed a data frame or some bullshit like that
+    spectroscopic_z = np.asarray(spectroscopic_z).flatten()
+
+    # Calculate cdfs of all mixtures at all ma points!
+    cdfs = scipy_normal.cdf(np.tile(spectroscopic_z, (photometric_mixtures['means'].shape[1], 1)).T,
+                            loc=photometric_mixtures['means'],
+                            scale=photometric_mixtures['std_deviations'])
+
+    # Multiply by the weights and sum
+    cdfs = np.sum(photometric_mixtures['weights'] * cdfs, axis=1)
+
+    cdfs_sorted = np.sort(cdfs)
+
+    # Cumulative sum and normalise so last element is 1.0
+    # cdfs_summed = np.cumsum(cdfs)
+    # cdfs_summed /= 0.5 * cdfs_summed.size
+
+    cdfs_summed = np.linspace(0., 1., num=cdfs_sorted.size)
+
+    residuals = np.log(np.cosh((cdfs_summed - cdfs_sorted)))
+    mean_residual = np.mean(residuals)
+    max_residual = np.max(residuals)
+
+    # Make a Wittman+2014-style plot
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+
+    ax.plot([0, 1], [0, 1], 'k--')
+    ax.plot(cdfs_sorted, cdfs_summed, 'r-')
+
+    ax.text(0.02, 0.98, 'Mean residual = {:.5f}'.format(mean_residual)
+            + '\nMax residual = {:.5f}'.format(max_residual),
+            ha='left', va='top', transform=ax.transAxes, fontsize=8,
+            bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0), ))
+
+    # Labels
+    ax.set_xlabel(r'$c_i$')
+    ax.set_ylabel(r'$F(c_i)$')
+
+    # Output time
+    if plt_title is not None:
+        ax.set_title(plt_title)
+
+    if save_name is not None:
+        fig.savefig(save_name)
+
+    if show_fig:
+        fig.show()
+    else:
+        plt.close(fig)
+
+    return [mean_residual, max_residual]
 
 
 """A set of unit tests and stuff to let us run this script independently for plots if desired."""

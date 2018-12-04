@@ -439,10 +439,21 @@ class BetaCDFLoss:
         return random_variables
 
 
+def binary_activation(x):
+
+    cond = tf.less(x, 0.)
+    out = tf.where(cond, tf.zeros(tf.shape(x)), x)
+
+    cond = tf.greater(out, 7.)
+    out = tf.where(cond, tf.multiply(7., tf.ones(tf.shape(x))), out)
+
+    return out
+
+
 class NormalCDFLoss:
 
-    def __init__(self, cdf_strength: float=1.0, std_deviation_strength: float=1.0, grid_size: Optional[int]=None,
-                 redshift_range: tuple=(0, 7), mixtures: int=1):
+    def __init__(self, cdf_strength: float=1.0, std_deviation_strength: float=1.0, normalisation_strength: float=1.0,
+                 grid_size: Optional[int]=None, redshift_range: tuple=(0, 7), mixtures: int=1):
         """Creates a normal distribution implemented in tensorflow notation.
         You may wish to access:
             - self.activation_functions: a list of activation functions that should be used with the mixture arguments,
@@ -454,12 +465,11 @@ class NormalCDFLoss:
         """
         # Names of and activation functions to apply to each output layer.
         self.coefficient_names = ['weights', 'means', 'std_deviations']
-        self.activation_functions = [tf.nn.softmax, None, tf.exp]
+        self.activation_functions = [tf.nn.softmax, binary_activation, tf.exp]
 
         # Variable initializers for the weights (kernel) and biases of each output layer. Try to set them sensibly.
-        self.kernel_initializers = [tf.initializers.random_normal, tf.initializers.random_normal,
-                                    tf.initializers.ones]
-        self.bias_initializers = [tf.initializers.ones, tf.initializers.ones, tf.initializers.ones]
+        self.kernel_initializers = [None, None, None]
+        self.bias_initializers = [tf.initializers.zeros, tf.initializers.ones, tf.initializers.zeros]
 
         # A useful constant to keep around
         self.one_div_sqrt_two_pi = np.float64(1 / np.sqrt(2 * np.pi))
@@ -467,12 +477,15 @@ class NormalCDFLoss:
         # Store variables for later
         self.cdf_strength = cdf_strength
         self.std_deviation_strength = std_deviation_strength
+        self.normalisation_strength = normalisation_strength
+        self.redshift_range = redshift_range
 
         if grid_size is not None:
-            a_grid = np.linspace(redshift_range[0], redshift_range[1], num=grid_size)
-            self.grid = tf.constant()
+            self.grid = np.linspace(redshift_range[0], redshift_range[1], num=grid_size, dtype=np.float32)
+            self.grid_size = grid_size
         else:
             self.grid = None
+            self.grid_size = None
 
     def tensor_evaluate(self, true_values, coefficients):
         """Lossfunc defined in tensorflow notation.
@@ -499,11 +512,14 @@ class NormalCDFLoss:
             # Sort and cumulatively sum the result, weighting it with the total sum of the cdfs so that the maximum val
             # in summed_cdfs is 1.0
             sorted_cdfs = tf.contrib.framework.sort(weighted_cdfs, axis=0)
-            summed_cdfs = tf.math.cumsum(weighted_cdfs, axis=0)
-            summed_cdfs = tf.divide(summed_cdfs, summed_cdfs[-1])
+
+            expected_cdfs = tf.linspace(0.0, 1.0, num=tf.shape(sorted_cdfs)[0])
+
+            #summed_cdfs = tf.math.cumsum(weighted_cdfs, axis=0)
+            #summed_cdfs = tf.divide(summed_cdfs, summed_cdfs[-1])
 
             # Calculate the mean squared residual between summed cdfs and sorted cdfs
-            cdf_residual = tf.multiply(tf.reduce_mean(tf.log(tf.cosh(tf.subtract(summed_cdfs, sorted_cdfs)))),
+            cdf_residual = tf.multiply(tf.reduce_max(tf.log(tf.cosh(tf.subtract(expected_cdfs, sorted_cdfs)))),
                                        self.cdf_strength)
 
             # DISTRIBUTION ACCURACY EVALUATION
@@ -513,35 +529,58 @@ class NormalCDFLoss:
             weighted_pdfs = tf.multiply(distributions.prob(tiled_true_values), coefficients['weights'])
             summed_pdfs = tf.reduce_sum(weighted_pdfs, 1, keepdims=False)
 
+            # Calculate the maximum either with a grid or with an educated guess
             if self.grid is not None:
-                tiled_grid = tf.tile(tf.expand_dims(self.grid, axis=1), [1, tf.shape(coefficients['means'])[1]])
+                # Tile up a grid
+                the_shape = tf.shape(coefficients['means'])
+                tiled_grid = tf.tile(tf.reshape(self.grid, [-1, 1, 1]), [1, the_shape[0], the_shape[1]])
 
+                # Use tf.map_fun to evaluate the distributions across the grid
+                distribution_function = lambda points: tf.multiply(distributions.prob(points), coefficients['weights'])
+                tiled_distributions = tf.map_fn(distribution_function, tiled_grid)
 
-            # Work out rough pdf maximums by evaluating at the mean of the most heavily weighted distributions
-            # This is faster than gridding, and hopefully loses ~no accuracy since a grid has a finite accuracy anyway
-            indices = tf.transpose([tf.range(0, tf.shape(coefficients['means'])[0]),
-                                    tf.argmax(coefficients['weights'], axis=1, output_type=tf.int32)])
-            biggest_pdfs = tf.expand_dims(tf.gather_nd(coefficients['means'], indices), axis=1)
+                # Sum all of the mixtures and find the max of each combined pdf
+                pdfs = tf.reduce_sum(tiled_distributions, axis=2)
+                summed_pdf_maxes = tf.reduce_max(pdfs, axis=0)
 
-            # Tile up the estimates of the pdf maxima and eval them against the distributions
-            tiled_biggest_pdfs = tf.tile(biggest_pdfs, [1, tf.shape(coefficients['means'])[1]])
-            approximate_pdf_max = tf.multiply(distributions.prob(tiled_biggest_pdfs), coefficients['weights'])
-            summed_pdf_maxes = tf.reduce_sum(approximate_pdf_max, 1, keepdims=False)
+            else:
+                # Work out rough pdf maximums by evaluating at the mean of the most heavily weighted distributions
+                # This is faster than gridding, and hopefully loses ~no accuracy since a grid has a finite accuracy anyway
+                indices = tf.transpose([tf.range(0, tf.shape(coefficients['means'])[0]),
+                                        tf.argmax(coefficients['weights'], axis=1, output_type=tf.int32)])
+                biggest_pdfs = tf.expand_dims(tf.gather_nd(coefficients['means'], indices), axis=1)
+
+                # Tile up the estimates of the pdf maxima and eval them against the distributions
+                tiled_biggest_pdfs = tf.tile(biggest_pdfs, [1, tf.shape(coefficients['means'])[1]])
+                approximate_pdf_max = tf.multiply(distributions.prob(tiled_biggest_pdfs), coefficients['weights'])
+                summed_pdf_maxes = tf.reduce_sum(approximate_pdf_max, axis=1, keepdims=False)
 
             # Divide the pdfs by their maximum to make the pdf residuals standard-deviation invariant
-            summed_pdfs = tf.divide(summed_pdfs, summed_pdf_maxes)
+            summed_pdf_maxes = tf.multiply(summed_pdf_maxes, self.normalisation_strength)
+            summed_pdfs = tf.divide(summed_pdfs, tf.add(summed_pdf_maxes, tf.subtract(1., self.normalisation_strength)))
 
             # Sum the result and take the negative mean log
             mean_log_pdf = tf.reduce_mean(tf.log(tf.cosh(summed_pdfs)))
             pdf_residual = tf.multiply(mean_log_pdf, -1)
 
-            # BIAS AGAINST LARGE STANDARD DEVIATIONS
+            # PRIOR AGAINST LARGE STANDARD DEVIATIONS
             # We sum all of the standard deviations and bias them towards being smaller in a knock-off of a Jeffreys log
             # uniform prior.
             mean_sigma_per_object = tf.reduce_mean(coefficients['std_deviations'], axis=1, keepdims=False)
             sigma_residual = tf.multiply(tf.reduce_mean(tf.log(tf.cosh(mean_sigma_per_object))), self.std_deviation_strength)
 
-            return tf.add(sigma_residual, tf.add(cdf_residual, pdf_residual))
+            # PRIOR AGAINST MEANS OUTSIDE OF THE REDSHIFT RANGE
+            # We check for any means outside the range and massively scale the loss function if they're there.
+            #little_means = tf.less(coefficients['means'], self.redshift_range[0])
+            #big_means = tf.greater(coefficients['means'], self.redshift_range[1])
+
+            # Add together counts, multiply by 10 to make it bigger
+            #bad_means_multiplier = tf.multiply(10., tf.add(tf.count_nonzero(little_means, dtype=tf.float32),
+            #                                               tf.count_nonzero(big_means, dtype=tf.float32)))
+
+            # ADD LOG MEANS AND MULTIPLY BY THE OUTSIDE OF REDSHIFT RANGE MULTIPLIER
+            total_residual = tf.add(sigma_residual, tf.add(cdf_residual, pdf_residual))
+            return total_residual
 
 
     @staticmethod

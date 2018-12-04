@@ -33,7 +33,7 @@ data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
     util.check_photometric_coverage_3dhst(data, flux_keys, error_keys, band_central_wavelengths,
                                           coverage_minimum=0.5,
                                           valid_photometry_column='use_phot',
-                                          missing_flux_handling='normalised_column_mean',
+                                          missing_flux_handling='normalised_column_mean_ratio',
                                           missing_error_handling='big_value')
 
 data_with_spec_z = util.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
@@ -51,8 +51,8 @@ y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
 x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
 
 # Make a network
-run_super_name = '18-12-03_cdf_method_improvements_2'
-run_name = '12_cdfs=0.30_stds=0.3_m=5_logcosh'
+run_super_name = '18-12-04_cdf_norm_constant'
+run_name = '5_cs=1.00_ss=0.0_ns=1.0_ba'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'
 
@@ -61,7 +61,8 @@ try:
 except FileExistsError:
     print('Not making a new directory because it already exists. I hope you changed the name btw!')
 
-loss_function = loss_funcs.NormalCDFLoss(cdf_strength=0.30, std_deviation_strength=0.3)
+loss_function = loss_funcs.NormalCDFLoss(cdf_strength=1.00, std_deviation_strength=0.0, normalisation_strength=1.0,
+                                         grid_size=100, mixtures=3)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
@@ -73,13 +74,13 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + 
                                     convolution_window_size=8,
                                     convolution_stride=4,
                                     layer_sizes=[20, 20, 20],
-                                    mixture_components=5,
+                                    mixture_components=3,
                                     learning_rate=1e-3)
 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=10000, max_runtime=1.0)
+exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.16)
 
 # network.plot_loss_function_evolution()
 
@@ -93,15 +94,21 @@ network.plot_pdf(validation_mixtures, [10, 100, 200, 300, 400, 500],
                  true_values=y_validate.flatten(),
                  figure_directory=run_dir)
 
-z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=True, limits=[0, 7],
-                    save_name=run_dir + 'phot_vs_spec.png',
-                    plt_title=run_name)
+overall_nmad = z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=True,
+                                   limits=[0, 7],
+                                   save_name=run_dir + 'phot_vs_spec.png',
+                                   plt_title=run_name)
 
 valid_map_values = util.where_valid_redshifts(validation_results['map'])
-z_plot.error_evaluator(data_with_spec_z['z_spec'].iloc[valid_map_values], validation_results['map'][valid_map_values],
-                       validation_results['lower'][valid_map_values], validation_results['upper'], show_fig=True,
+z_plot.error_evaluator(y_validate.flatten(), validation_results['map'],
+                       validation_results['lower'], validation_results['upper'], show_fig=True,
                        save_name=run_dir + 'errors.png',
                        plt_title=run_name)
+
+mean_residual, max_residual = z_plot.error_evaluator_wittman(y_validate.flatten(),
+                                                             validation_mixtures, show_fig=True,
+                                                             save_name=run_dir + 'wittman_errors.png',
+                                                             plt_title=run_name)
 
 """
 # Run the pair algorithm on everything that didn't have photometric redshifts

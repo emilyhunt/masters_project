@@ -458,7 +458,33 @@ def check_photometric_coverage_3dhst(data, flux_keys: list, error_keys: list,
         print('{} of {} fluxes were modified.'
               .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
 
-    # Method five: interpolate linearly between neighbouring bands.
+    # Method five: set missing points to the mean value of that column, but normalised with the help of row mean ratios.
+    elif missing_flux_handling == 'normalised_column_mean_ratio':
+        print('Dealing with missing data by setting it to the ratio row-normalised mean of columns...')
+        # Grab the fluxes that need fixing and make the fixeyness happen!
+        fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
+
+        # Set bad values to np.nan before taking means so the mean ignores them
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=np.nan)
+
+        # Take the mean of each column, then stretch it to be as long as the data itself (and grab the overall mean too)
+        column_means = np.nanmean(np.asarray(data[flux_keys]), axis=0)
+        overall_mean = np.nanmean(column_means)
+        column_means = np.repeat(column_means.reshape(1, -1), data.shape[0], axis=0)
+
+        # Take the mean of each row, then reshape it into a vertical array and make it horizontally as wide as the
+        # number of flux rows
+        row_means = np.nanmean(np.asarray(data[flux_keys]), axis=1)
+        row_means = np.repeat(row_means.reshape(-1, 1), len(flux_keys), axis=1)
+
+        normalised_means = column_means * row_means / overall_mean
+
+        # Assign the new values
+        data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=normalised_means)
+        print('{} of {} fluxes were modified.'
+              .format(fluxes_to_fix.size - np.count_nonzero(fluxes_to_fix), fluxes_to_fix.size))
+
+    # Method six: interpolate linearly between neighbouring bands.
     elif missing_flux_handling == 'linear_interpolation':
         if band_central_wavelengths is None:
             raise ValueError('interpolation activated yet no band central wavelengths were provided!')

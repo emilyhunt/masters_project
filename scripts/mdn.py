@@ -116,9 +116,9 @@ class MixtureDensityNetwork:
                     self.graph_output[output_name] = tf.layers.dense(self.graph_layers[-1], mixture_components,
                                                                      activation=activation_function,
                                                                      kernel_regularizer=self.regularisation_function,
-                                                                     name='output_' + output_name)
-                                                                     #bias_initializer=bias_initializer,
-                                                                     #kernel_initializer=kernel_initializer
+                                                                     name='output_' + output_name,
+                                                                     bias_initializer=bias_initializer,
+                                                                     kernel_initializer=kernel_initializer)
 
             # Collect all the regularization losses
             with tf.variable_scope('regularization'):

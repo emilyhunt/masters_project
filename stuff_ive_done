@@ -14,7 +14,7 @@ Stuff I could do:
 
 
 03/12/18
-- Lots of testing and trying to tune the CDF loss, now with PDFs normalised with an estimate of their maximum
+- Lots of testing and trying to tune the CDF loss, now with PDFs normalised with an estimate of their maximumsow
 
 ~~ Info on CDF loss latest testing round ~~
 - Log cosh loss everywhere seems to be good for stability and the like
