@@ -18,7 +18,7 @@ from typing import Union, Optional
 
 class NormalPDFLoss:
 
-    def __init__(self):
+    def __init__(self, perturbation_coefficient: float=0.3):
         """Creates a normal distribution implemented in tensorflow notation.
         You may wish to access:
             - self.activation_functions: a list of activation functions that should be used with the mixture arguments,
@@ -27,18 +27,16 @@ class NormalPDFLoss:
         """
         # Names of and activation functions to apply to each output layer.
         self.coefficient_names = ['weights', 'means', 'std_deviations']
-        self.activation_functions = [tf.nn.softmax, None, tf.exp]
+        self.activation_functions = [tf.nn.softmax, binary_activation, tf.exp]
 
         # Variable initializers for the weights (kernel) and biases of each output layer. Try to set them sensibly.
-        self.kernel_initializers = [tf.initializers.random_normal, tf.initializers.random_normal,
-                                    tf.initializers.ones]
-        self.bias_initializers = [tf.initializers.ones, tf.initializers.ones, tf.initializers.ones]
+        self.kernel_initializers = [None, None, None]
+        self.bias_initializers = [tf.initializers.zeros, tf.initializers.ones, tf.initializers.ones]
 
         # A useful constant to keep around
-        self.one_div_sqrt_two_pi = np.float64(1 / np.sqrt(2 * np.pi))
+        self.perturbation_coefficient = perturbation_coefficient
 
-    @staticmethod
-    def tensor_evaluate(true_values, coefficients):
+    def tensor_evaluate(self, true_values, coefficients):
         """Lossfunc defined in tensorflow notation.
 
         Args:
@@ -52,6 +50,10 @@ class NormalPDFLoss:
             # Initialise all of our lovely distribution friends
             distributions = tf.distributions.Normal(coefficients['means'], coefficients['std_deviations'])
 
+            # Perturb all of the true values with our perturbation law
+            random_values = tf.random.normal(tf.shape(true_values), mean=0.0, stddev=1.0)
+            true_values = tf.add(true_values, tf.multiply(random_values, self.perturbation_coefficient))
+
             # Tile the true values so that they have the same shape as the distributions and can be evaluated
             tiled_true_values = tf.tile(true_values, [1, tf.shape(coefficients['means'])[1]])
 
@@ -59,9 +61,30 @@ class NormalPDFLoss:
             weighted_pdfs = tf.multiply(distributions.prob(tiled_true_values), coefficients['weights'])
             weighted_pdfs = tf.reduce_sum(weighted_pdfs, axis=1, keepdims=False)
 
+            # Calculate some stats
+            max_pdf = tf.reduce_max(weighted_pdfs)
+            min_pdf = tf.reduce_min(weighted_pdfs)
+            mean_pdf = tf.reduce_mean(weighted_pdfs)
+
+            max_mean = tf.reduce_max(coefficients['means'])
+            min_mean = tf.reduce_min(coefficients['means'])
+            mean_mean = tf.reduce_mean(coefficients['means'])
+
+            max_std = tf.reduce_max(coefficients['std_deviations'])
+            min_std = tf.reduce_min(coefficients['std_deviations'])
+            mean_std = tf.reduce_mean(coefficients['std_deviations'])
+
+            max_weight = tf.reduce_max(coefficients['weights'])
+            min_weight = tf.reduce_min(coefficients['weights'])
+            mean_weight = tf.reduce_mean(coefficients['weights'])
+
             # Take the mean negative log and return
-            log_pdfs = -tf.log(weighted_pdfs)
-            return tf.reduce_mean(log_pdfs)
+            log_pdfs = tf.reduce_mean(tf.multiply(-1., tf.log(weighted_pdfs)))
+            return {'total_residual': log_pdfs,
+                    'pdf_max': max_pdf, 'pdf_min': min_pdf, 'pdf_mean': mean_pdf,
+                    'mean_max': max_mean, 'mean_min': min_mean, 'mean_mean': mean_mean,
+                    'std_max': max_std, 'std_min': min_std, 'std_mean': mean_std,
+                    'weight_max': max_weight, 'weight_min': min_weight, 'weight_mean': mean_weight}
 
     @staticmethod
     def pdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
@@ -90,11 +113,44 @@ class NormalPDFLoss:
             all_the_pdfs[i, :] = scipy_normal.pdf(x_data, loc=a_mean, scale=a_std_d) * a_weight
             i += 1
 
-        # Sum if requested
+        # Sum each mixture if requested, giving the cdf of the overall mixture density for that object
         if sum_mixtures:
             return np.sum(all_the_pdfs, axis=0)
         else:
             return all_the_pdfs
+
+    @staticmethod
+    def cdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
+        """Lossfunc defined in simple numpy arrays. Will instead return a cdf for the given object. Fastest at
+        evaluating lots of x data points: for instance, for initial minimum finding or for plotting a cdf.
+
+            Args:
+                x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
+                coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                              of those values for the given object.
+                sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
+                              a big array of all the mixture components individually.
+
+            Returns:
+                A 1D array of the cdf value(s) at whatever point(s) you've evaluated it at.
+        """
+        # Typecast x_data as a 1D numpy array and work out how many mixtures there are
+        x_data = np.array([x_data]).flatten()
+        n_mixtures = coefficients['weights'].size
+        all_the_cdfs = np.empty((n_mixtures, x_data.size))
+
+        # Cycle over each mixture and evaluate the pdf
+        i = 0
+        for a_weight, a_mean, a_std_d in zip(coefficients['weights'], coefficients['means'],
+                                             coefficients['std_deviations']):
+            all_the_cdfs[i, :] = scipy_normal.cdf(x_data, loc=a_mean, scale=a_std_d) * a_weight
+            i += 1
+
+        # Sum each mixture if requested, giving the cdf of the overall mixture density for that object
+        if sum_mixtures:
+            return np.sum(all_the_cdfs, axis=0)
+        else:
+            return all_the_cdfs
 
     @staticmethod
     def pdf_single_point(x_point: Union[float, int], coefficients: dict):
@@ -108,6 +164,20 @@ class NormalPDFLoss:
             A float of the pdf evaluated at a single point.
         """
         return np.sum(scipy_normal.pdf(x_point, loc=coefficients['means'], scale=coefficients['std_deviations'])
+                      * coefficients['weights'])
+
+    @staticmethod
+    def cdf_single_point(x_point: Union[float, int], coefficients: dict):
+        """CDF of lossfunc implemented in a much faster way for single point evaluations.
+        Args:
+            x_point: the y/dependent variable data to evaluate against. Can only be a float or int.
+            coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                          of those values for the given object.
+
+        Returns:
+            A float of the cdf evaluated at a single point.
+        """
+        return np.sum(scipy_normal.cdf(x_point, loc=coefficients['means'], scale=coefficients['std_deviations'])
                       * coefficients['weights'])
 
     @staticmethod
@@ -449,6 +519,17 @@ def binary_activation(x):
 
     return out
 
+def binary_activation_2(x):
+
+    #x = tf.exp(x)
+    cond = tf.less(x, 0.05)
+    out = tf.where(cond, tf.multiply(0.05, tf.ones(tf.shape(x))), x)
+
+    cond = tf.greater(x, 10.)
+    out = tf.where(cond, tf.multiply(10., tf.ones(tf.shape(x))), x)
+
+    return out
+
 
 class NormalCDFLoss:
 
@@ -508,6 +589,15 @@ class NormalCDFLoss:
             # Evaluate the CDF of all the distributions, then do some summing to find the CDF of the overall mixtures
             weighted_cdfs = tf.multiply(distributions.cdf(tiled_true_values), coefficients['weights'])
             weighted_cdfs = tf.reduce_sum(weighted_cdfs, axis=1, keepdims=False)
+
+            # Evaluate the CDFs at the limits of the redshift range so we can normalise them
+            cdf_constant = tf.multiply(distributions.cdf(self.redshift_range[0]), coefficients['weights'])
+            cdf_constant = tf.reduce_sum(cdf_constant, axis=1, keepdims=False)
+            cdf_multiplier = tf.multiply(distributions.cdf(self.redshift_range[1]), coefficients['weights'])
+            cdf_multiplier = tf.reduce_sum(cdf_multiplier, axis=1, keepdims=False)
+
+            # Normalise the existing CDFs
+            weighted_cdfs = tf.subtract(tf.divide(weighted_cdfs, cdf_multiplier), cdf_constant)
 
             # Sort and cumulatively sum the result, weighting it with the total sum of the cdfs so that the maximum val
             # in summed_cdfs is 1.0
@@ -580,7 +670,11 @@ class NormalCDFLoss:
 
             # ADD LOG MEANS AND MULTIPLY BY THE OUTSIDE OF REDSHIFT RANGE MULTIPLIER
             total_residual = tf.add(sigma_residual, tf.add(cdf_residual, pdf_residual))
-            return total_residual
+
+            return {'total_residual': total_residual,
+                    'sigma_residual': sigma_residual,
+                    'cdf_residual': cdf_residual,
+                    'pdf_residual': pdf_residual}
 
 
     @staticmethod
@@ -610,11 +704,44 @@ class NormalCDFLoss:
             all_the_pdfs[i, :] = scipy_normal.pdf(x_data, loc=a_mean, scale=a_std_d) * a_weight
             i += 1
 
-        # Sum if requested
+        # Sum each mixture if requested, giving the cdf of the overall mixture density for that object
         if sum_mixtures:
             return np.sum(all_the_pdfs, axis=0)
         else:
             return all_the_pdfs
+
+    @staticmethod
+    def cdf_multiple_points(x_data, coefficients: dict, sum_mixtures=True):
+        """Lossfunc defined in simple numpy arrays. Will instead return a cdf for the given object. Fastest at
+        evaluating lots of x data points: for instance, for initial minimum finding or for plotting a cdf.
+
+            Args:
+                x_data: the y/dependent variable data to evaluate against. Can be an array or a float.
+                coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                              of those values for the given object.
+                sum_mixtures: defines whether or not we should sum the mixture distribution at each point or return
+                              a big array of all the mixture components individually.
+
+            Returns:
+                A 1D array of the cdf value(s) at whatever point(s) you've evaluated it at.
+        """
+        # Typecast x_data as a 1D numpy array and work out how many mixtures there are
+        x_data = np.array([x_data]).flatten()
+        n_mixtures = coefficients['weights'].size
+        all_the_cdfs = np.empty((n_mixtures, x_data.size))
+
+        # Cycle over each mixture and evaluate the pdf
+        i = 0
+        for a_weight, a_mean, a_std_d in zip(coefficients['weights'], coefficients['means'],
+                                             coefficients['std_deviations']):
+            all_the_cdfs[i, :] = scipy_normal.cdf(x_data, loc=a_mean, scale=a_std_d) * a_weight
+            i += 1
+
+        # Sum each mixture if requested, giving the cdf of the overall mixture density for that object
+        if sum_mixtures:
+            return np.sum(all_the_cdfs, axis=0)
+        else:
+            return all_the_cdfs
 
     @staticmethod
     def pdf_single_point(x_point: Union[float, int], coefficients: dict):
@@ -631,7 +758,20 @@ class NormalCDFLoss:
                       * coefficients['weights'])
 
     @staticmethod
-    def draw_random_variables(n_samples: int, coefficients: dict):
+    def cdf_single_point(x_point: Union[float, int], coefficients: dict):
+        """CDF of lossfunc implemented in a much faster way for single point evaluations.
+        Args:
+            x_point: the y/dependent variable data to evaluate against. Can only be a float or int.
+            coefficients: a dictionary with a 'weights', 'alpha' and 'beta' argument, each pointing to 1D arrays
+                          of those values for the given object.
+
+        Returns:
+            A float of the cdf evaluated at a single point.
+        """
+        return np.sum(scipy_normal.cdf(x_point, loc=coefficients['means'], scale=coefficients['std_deviations'])
+                      * coefficients['weights'])
+
+    def draw_random_variables(self, n_samples: int, coefficients: dict):
         """Draws random variables from pdf_multiple_points for numerical integration uses. May only be used on a single
         mixture at a time (so make sure elements of 'coefficients' are 1D.) Otherwise, it will fail badly, and quietly
         too (no error checking is added to make sure it stays fast.)
@@ -645,11 +785,13 @@ class NormalCDFLoss:
         """
         # Todo: I fail really badly when passed a python list (it makes number_weights into a longer list, it's owwie)
 
-        # Define a dictionary of samples and work out how many we'll want to draw from each mixture
-        random_variables = np.empty(n_samples)
+        # Define an array of samples and work out how many we'll want to draw from each mixture. We ensure that the
+        # array of samples has a value that is out of the allowed redshift range so we can work out which ones still
+        # need editing.
+        random_variates = np.zeros(n_samples) - self.redshift_range[0] - 1.
         number_weights = np.around(coefficients['weights'] * n_samples).astype(int)
 
-        # Add 0 to the start of number_weights so that when writing random variables we start at the beginning of
+        # Add 0 to the start of number_weights so that when writing random variates we start at the beginning of
         # the array
         number_weights = np.append([0], number_weights)
 
@@ -657,7 +799,7 @@ class NormalCDFLoss:
         # rounding error (not normally more than just 1) from the largest weights.
         difference = n_samples - np.sum(number_weights)
 
-        if difference is not 0:
+        if difference != 0:
             number_weights[np.argmax(number_weights)] += difference
 
         # Make a cumulative sum so that we've got more by way of
@@ -666,8 +808,19 @@ class NormalCDFLoss:
         # Draw some random variables for fun
         i = 1
         for a_mean, a_std_d in zip(coefficients['means'], coefficients['std_deviations']):
-            random_variables[number_indices[i-1]:number_indices[i]] = scipy_normal.rvs(loc=a_mean, scale=a_std_d,
-                                                                                       size=number_weights[i])
+
+            # Cycle over drawing random variates until they're all in the correct range
+            variates_still_to_draw = np.array([1])
+            while variates_still_to_draw.size != 0:
+                variates_still_to_draw = np.where(np.logical_or(
+                    random_variates[number_indices[i-1]:number_indices[i]] < self.redshift_range[0],
+                    random_variates[number_indices[i-1]:number_indices[i]] > self.redshift_range[1]))[0]
+
+                random_variates[number_indices[i-1]:number_indices[i]][variates_still_to_draw] = \
+                    scipy_normal.rvs(loc=a_mean, scale=a_std_d, size=variates_still_to_draw.size)
+
             i += 1
 
-        return random_variables
+        return random_variates
+
+# todo: only normal_cdf has been updated to have redshift_range etc properly defined and to integrate properly.

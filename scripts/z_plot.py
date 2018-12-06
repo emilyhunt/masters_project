@@ -438,7 +438,7 @@ def error_evaluator(spectroscopic_z, photometric_z, sigma_1_lower, sigma_1_upper
         plt.close(fig)
 
 
-def error_evaluator_wittman(spectroscopic_z, photometric_mixtures,
+def error_evaluator_wittman(spectroscopic_z, validation_mixtures, validation_results,
                             plt_title: Optional[str]=None, save_name: Optional[str]=None, show_fig: bool=False,
                             validity_condition: str='greater_than_zero'):
     """Makes a histogram evaluating how good the given redshift error estimates are, using the Wittman+2014 method of
@@ -469,12 +469,15 @@ def error_evaluator_wittman(spectroscopic_z, photometric_mixtures,
     spectroscopic_z = np.asarray(spectroscopic_z).flatten()
 
     # Calculate cdfs of all mixtures at all ma points!
-    cdfs = scipy_normal.cdf(np.tile(spectroscopic_z, (photometric_mixtures['means'].shape[1], 1)).T,
-                            loc=photometric_mixtures['means'],
-                            scale=photometric_mixtures['std_deviations'])
+    cdfs = scipy_normal.cdf(np.tile(spectroscopic_z, (validation_mixtures['means'].shape[1], 1)).T,
+                            loc=validation_mixtures['means'],
+                            scale=validation_mixtures['std_deviations'])
 
     # Multiply by the weights and sum
-    cdfs = np.sum(photometric_mixtures['weights'] * cdfs, axis=1)
+    cdfs = np.sum(validation_mixtures['weights'] * cdfs, axis=1)
+
+    # Normalise the cdfs with the initial and end values
+    cdfs = cdfs * validation_results['cdf_multiplier'] + validation_results['cdf_constant']
 
     cdfs_sorted = np.sort(cdfs)
 

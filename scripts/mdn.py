@@ -10,7 +10,7 @@ import pymc3
 from matplotlib import cm
 from scripts import loss_funcs
 from scripts.twitter import calc_local_time
-from typing import Optional
+from typing import Optional, Union
 from sklearn.model_selection import train_test_split
 from scipy.optimize import minimize as scipy_minimize
 from sklearn.preprocessing import RobustScaler
@@ -130,9 +130,21 @@ class MixtureDensityNetwork:
             # Initialise the loss function (storing the user-specified one with the class) and training scheme
             with tf.variable_scope('loss_calculation'):
                 self.loss_function = loss_function
-                self.loss_from_function = self.loss_function.tensor_evaluate(self.y_placeholder, self.graph_output)
+                loss_function_residuals = self.loss_function.tensor_evaluate(self.y_placeholder, self.graph_output)
+                self.loss_from_function = loss_function_residuals['total_residual']
+
+                # Get all the other different residuals from loss_from_function, either using or summary writing them
+                residuals = list(loss_function_residuals.keys())
+                residuals.remove('total_residual')
+
+                # Record summaries of all the individual residuals
+                self.summary_residuals = []
+                for a_residual in residuals:
+                    self.summary_residuals.append(tf.summary.scalar(a_residual, loss_function_residuals[a_residual]))
+
                 self.loss_total = tf.add(self.loss_from_function, self.loss_from_regularisation)
-                self.train_function = tf.train.AdamOptimizer(learning_rate=learning_rate, name='optimizer').minimize(self.loss_total)
+                self.train_function = tf.train.AdamOptimizer(learning_rate=learning_rate,
+                                                             name='optimizer').minimize(self.loss_total)
 
             # Initialise a tensorflow session object using our lovely graph we just made, and initialise the variables
             self.session = tf.Session()
@@ -420,6 +432,9 @@ class MixtureDensityNetwork:
         for a_constant in self.graph_output_names:
             result[a_constant] = self.session.run(self.graph_output[a_constant], feed_dict=self.validation_data)
 
+        # Ensure that the area within the allowed range is unity by calculating cdf transform parameters
+        # todo
+
         return result
 
     def plot_loss_function_evolution(self, start: int=0, end: int=-1, y_log: bool=False,
@@ -460,12 +475,14 @@ class MixtureDensityNetwork:
 
         plt.show()
 
-    def calculate_validation_stats(self, validation_data, reporting_interval: int=100, start_resolution: int=100,
+    def calculate_validation_stats(self, validation_mixtures, data_range: Union[tuple, list], reporting_interval: int=100,
+                                   start_resolution: int=100,
                                    uncertainty_integration_resolution: int=2000, uncertainty_sigma_level: float=1.):
         """Calculates the MAP (maximum a posteriori), uncertainty and modality of a given set of mixture distributions.
 
         Args:
-            validation_data (dict): the data from a .validate call.
+            validation_mixtures (dict): the data from a .validate call.
+            data_range (list-like of length 2): the allowed range of data.
             reporting_interval (int): how often to let the user know which objects we're working on. Default: 100.
             start_resolution (int): number of points to test against when finding the initial guess.
             uncertainty_integration_resolution (int): number of random variables to draw when integrating the pdfs to
@@ -489,15 +506,19 @@ class MixtureDensityNetwork:
             return -1 * my_loss_function.pdf_single_point(x_data, my_object_dictionary)
 
         # Create blank arrays of np.nan values to populate with hopefully successful minimisations
-        n_objects = validation_data[self.graph_output_names[0]].shape[0]
+        n_objects = validation_mixtures[self.graph_output_names[0]].shape[0]
         map_values = np.empty(n_objects)
         map_values[:] = np.nan
         upper_limits = map_values.copy()
         lower_limits = map_values.copy()
+        cdf_constant = map_values.copy()
+        cdf_multiplier = map_values.copy()
         modality = np.zeros(n_objects, dtype=int)
+        valid_map_values = np.empty(n_objects, dtype=bool)
+        valid_map_values[:] = False
 
         # A bit of setup for our initial guess of MAP values
-        guess_x_range = np.linspace(self.y_data_range[0], self.y_data_range[1], num=start_resolution)
+        guess_x_range = np.linspace(data_range[0], data_range[1], num=start_resolution)
 
         # Loop over each object and work out the stats for each
         i = 0
@@ -508,7 +529,7 @@ class MixtureDensityNetwork:
             # Make a dictionary that only has data on this specific galaxy
             object_dictionary = {}
             for a_name in self.graph_output_names:
-                object_dictionary[a_name] = validation_data[a_name][i]
+                object_dictionary[a_name] = validation_mixtures[a_name][i]
 
             # Make a sensible starting guess and look at the y values in parameter space
             guess_y_range = self.loss_function.pdf_multiple_points(guess_x_range, object_dictionary, sum_mixtures=True)
@@ -544,6 +565,7 @@ class MixtureDensityNetwork:
             # Store the result only if we're able to
             if result.success:
                 map_values[i] = result.x
+                valid_map_values[i] = True
                 successes += 1
                 mean_number_of_iterations += result.nit
 
@@ -564,6 +586,11 @@ class MixtureDensityNetwork:
                     limits = pymc3.stats.quantiles(random_deviates, qlist=[15.865, 84.135])  # Again, 1 sigma error.
                     lower_limits[i] = limits[15.865]
                     upper_limits[i] = limits[84.135]
+
+                # Calculate constants to let us normalise the CDFs later
+                cdf_stuff = self.loss_function.cdf_multiple_points(data_range, object_dictionary)
+                cdf_constant[i] = -1. * cdf_stuff[0]
+                cdf_multiplier[i] = 1. / cdf_stuff[1]
 
             else:
                 print('Failed to find MAP for object {}!'.format(i))
@@ -592,8 +619,8 @@ class MixtureDensityNetwork:
         print('Found MAP values for {:.2f}% of objects.'.format(100 * successes / float(n_objects)))
         print('Mean number of MAP minimisation iterations = {}'.format(mean_number_of_iterations))
 
-        return pd.DataFrame({'map': map_values, 'lower': lower_limits,
-                             'upper': upper_limits, 'modality': modality})
+        return pd.DataFrame({'map': map_values, 'lower': lower_limits, 'upper': upper_limits, 'modality': modality,
+                             'valid': valid_map_values, 'cdf_constant': cdf_constant, 'cdf_multiplier': cdf_multiplier})
 
     def plot_pdf(self, validation_data: dict, values_to_highlight, data_range=None, resolution: int=100,
                  map_values=None, true_values=None, figure_directory: Optional[str]=None, show_fig: bool=False):

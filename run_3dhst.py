@@ -39,20 +39,20 @@ data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
 data_with_spec_z = util.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
 data_with_spec_z = util.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
 
-#data_no_spec_z = util.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
-#data_no_spec_z = util.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
+data_no_spec_z = util.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
+data_no_spec_z = util.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
 
 keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]
 
-x = np.asarray(data_with_spec_z[keys_in_order])
+x = np.asarray(data_with_spec_z[reduced_flux_keys])
 y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
 
 # Split everything into training and validation data sets
 x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
 
 # Make a network
-run_super_name = '18-12-04_cdf_norm_constant'
-run_name = '5_cs=1.00_ss=0.0_ns=1.0_ba'
+run_super_name = '18-12-05_pdf_perturbation'
+run_name = '26_pdf_adam_nocosh_pc=0.0385_no_errors'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'
 
@@ -61,11 +61,14 @@ try:
 except FileExistsError:
     print('Not making a new directory because it already exists. I hope you changed the name btw!')
 
-loss_function = loss_funcs.NormalCDFLoss(cdf_strength=1.00, std_deviation_strength=0.0, normalisation_strength=1.0,
-                                         grid_size=100, mixtures=3)
+#loss_function = loss_funcs.NormalCDFLoss(cdf_strength=0.00, std_deviation_strength=0.0, normalisation_strength=1.0,
+#                                         grid_size=100, mixtures=5)
+
+loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient=0.0385)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
+                                    regularization_scale=0.1,
                                     x_scaling='standard',
                                     y_scaling=None,
                                     x_features=x_train.shape[-1],
@@ -74,20 +77,20 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + 
                                     convolution_window_size=8,
                                     convolution_stride=4,
                                     layer_sizes=[20, 20, 20],
-                                    mixture_components=3,
+                                    mixture_components=5,
                                     learning_rate=1e-3)
 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.16)
+exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.16, max_epochs_without_report=25)
 
 # network.plot_loss_function_evolution()
 
 network.set_validation_data(x_validate, y_validate)
 
 validation_mixtures = network.validate()
-validation_results = network.calculate_validation_stats(validation_mixtures)
+validation_results = network.calculate_validation_stats(validation_mixtures, [0, 7])
 
 network.plot_pdf(validation_mixtures, [10, 100, 200, 300, 400, 500],
                  map_values=validation_results['map'],
@@ -106,7 +109,7 @@ z_plot.error_evaluator(y_validate.flatten(), validation_results['map'],
                        plt_title=run_name)
 
 mean_residual, max_residual = z_plot.error_evaluator_wittman(y_validate.flatten(),
-                                                             validation_mixtures, show_fig=True,
+                                                             validation_mixtures, validation_results, show_fig=True,
                                                              save_name=run_dir + 'wittman_errors.png',
                                                              plt_title=run_name)
 

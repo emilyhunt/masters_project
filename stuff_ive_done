@@ -12,9 +12,17 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+04/12/18
+- Ratio normalised column means are the new winner! Thankyou Stijn <3
+- This network is a fucking cheat
+- By putting distributions all over the place, including outside the redshift range, it can minimise the Wittman condition still
+- Is it really a pdf if the area inside the allowed region doesn't sum to unity? << THERE'S YOUR PROBLEM
+- Binary activation function is sorta helpful, but not massively
+- YOU COULD NORMALISE THE CDFS AGAINST THE AREA ACTUALLY WITHIN THE ALLOWED RANGE!!! FUCK YES this would work :D
+
 
 03/12/18
-- Lots of testing and trying to tune the CDF loss, now with PDFs normalised with an estimate of their maximumsow
+- Lots of testing and trying to tune the CDF loss, now with PDFs normalised with an estimate of their maximums
 
 ~~ Info on CDF loss latest testing round ~~
 - Log cosh loss everywhere seems to be good for stability and the like
