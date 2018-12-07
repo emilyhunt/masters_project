@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+import scripts.file_handling
 import scripts.galaxy_pairs
 from scripts import util
 from typing import Optional
@@ -532,8 +533,8 @@ if __name__ == '__main__':
 
     # Read in the .save files
     print('Reading in default save files')
-    redshifts = util.read_save(data_dir + files_to_read[0])
-    coords = util.read_save(data_dir + files_to_read[1])
+    redshifts = scripts.file_handling.read_save(data_dir + files_to_read[0])
+    coords = scripts.file_handling.read_save(data_dir + files_to_read[1])
 
     # Join the co-ordinates to the redshifts DataFrame
     redshifts['gs4_ra'] = coords['gs4_ra']

@@ -12,6 +12,15 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+06/12/18
+- THE PERTURBATION COEFFICIENT IS THE HERO I NEEDED
+- MDNs are designed inherently to predict *generative* data models. Therefore, the training data must itself be generative.
+- This has produced the best results yet! It actually slightly lowers the NMAD (probably a bit like a form of regularisation) and is getting results that really aren't far from EAZY. In addition, the 5 sigma outlier level is just *better.* This method causes more than half as few outliers, which is AWESOME!
+- I should try using a perturbation function. It seems loosely analogous to the NMAD, so logically, each zspec will want to use a slightly different amount of perturbation (probably, for instance, as a function of increasing zspec.)
+
+05/12/18
+- Still lots of issues with the CDFs, even when normalising them to the allowed range. It just still doesn't really play ball and is a bit unstable.
+
 04/12/18
 - Ratio normalised column means are the new winner! Thankyou Stijn <3
 - This network is a fucking cheat
@@ -19,7 +28,6 @@ Stuff I could do:
 - Is it really a pdf if the area inside the allowed region doesn't sum to unity? << THERE'S YOUR PROBLEM
 - Binary activation function is sorta helpful, but not massively
 - YOU COULD NORMALISE THE CDFS AGAINST THE AREA ACTUALLY WITHIN THE ALLOWED RANGE!!! FUCK YES this would work :D
-
 
 03/12/18
 - Lots of testing and trying to tune the CDF loss, now with PDFs normalised with an estimate of their maximums

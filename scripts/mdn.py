@@ -432,9 +432,6 @@ class MixtureDensityNetwork:
         for a_constant in self.graph_output_names:
             result[a_constant] = self.session.run(self.graph_output[a_constant], feed_dict=self.validation_data)
 
-        # Ensure that the area within the allowed range is unity by calculating cdf transform parameters
-        # todo
-
         return result
 
     def plot_loss_function_evolution(self, start: int=0, end: int=-1, y_log: bool=False,

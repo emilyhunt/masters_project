@@ -4,6 +4,9 @@ import numpy as np
 import os
 import pandas as pd
 import time
+
+import scripts.file_handling
+from scripts import preprocessing
 from scripts import mdn
 from scripts import loss_funcs
 from scripts import z_plot
@@ -15,10 +18,10 @@ from sklearn.model_selection import train_test_split
 
 
 # Begin by reading in the data
-data = util.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_goodss_config.keys_to_keep,
-                      new_column_names=None, get_flux_and_error_keys=False)
+data = scripts.file_handling.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_goodss_config.keys_to_keep,
+                                       new_column_names=None, get_flux_and_error_keys=False)
 
-archival_redshifts = util.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
+archival_redshifts = scripts.file_handling.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
 
 data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68']] = \
     archival_redshifts[['gs4_zspec', 'gs4_zphot', 'gs4_zphot_l68', 'gs4_zphot_u68']]
@@ -30,31 +33,41 @@ band_central_wavelengths = hst_goodss_config.band_central_wavelengths
 
 # Take a look at the coverage in different photometric bands
 data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
-    util.check_photometric_coverage_3dhst(data, flux_keys, error_keys, band_central_wavelengths,
-                                          coverage_minimum=0.5,
-                                          valid_photometry_column='use_phot',
-                                          missing_flux_handling='normalised_column_mean_ratio',
-                                          missing_error_handling='big_value')
+    scripts.preprocessing.missing_data_handler(data, flux_keys, error_keys, band_central_wavelengths,
+                                               coverage_minimum=0.5,
+                                               valid_photometry_column='use_phot',
+                                               missing_flux_handling='normalised_column_mean_ratio',
+                                               missing_error_handling='big_value')
 
-data_with_spec_z = util.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
-data_with_spec_z = util.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
+# Convert everything to log fluxes with preprocessing.PhotometryScaler()
 
-data_no_spec_z = util.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
-data_no_spec_z = util.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
+#data_with_spec_z[reduced_flux_keys] = np.where(data_with_spec_z[reduced_flux_keys] < 0.0, 0.0, data_with_spec_z[reduced_flux_keys])
+#data_no_spec_z[reduced_flux_keys] = np.where(data_no_spec_z[reduced_flux_keys] < 0.0, 0.0, data_no_spec_z[reduced_flux_keys])
+
+preprocessor = preprocessing.PhotometryScaler([data_with_spec_z, data_no_spec_z],
+                                              reduced_flux_keys, reduced_error_keys)
+
+data_with_spec_z = preprocessor.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
+data_with_spec_z = preprocessor.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
+
+data_no_spec_z = preprocessor.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
+data_no_spec_z = preprocessor.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
 
 keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]
 
-x = np.asarray(data_with_spec_z[reduced_flux_keys])
-y = np.asarray(data_with_spec_z['z_spec']).reshape(-1, 1)
-
 # Split everything into training and validation data sets
-x_train, x_validate, y_train, y_validate = train_test_split(x, y, random_state=42)
+data_training, data_validation = preprocessor.train_validation_split(data_with_spec_z, training_set_size=0.75, seed=42)
+
+x_train = data_training[keys_in_order].values
+y_train = data_training['z_spec'].values.reshape(-1, 1)
+x_validate = data_validation[keys_in_order].values
+y_validate = data_validation['z_spec'].values.reshape(-1, 1)
 
 # Make a network
 run_super_name = '18-12-05_pdf_perturbation'
-run_name = '26_pdf_adam_nocosh_pc=0.0385_no_errors'
+run_name = '34_negative_fluxes_are_now_zero_fluxes'
 
-run_dir = './plots/' + run_super_name + '/' + run_name + '/'
+run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
 try:
     os.mkdir(run_dir)

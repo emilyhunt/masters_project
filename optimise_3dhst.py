@@ -2,6 +2,9 @@
 
 import numpy as np
 import os
+
+import scripts.file_handling
+import scripts.preprocessing
 from scripts import mdn
 from scripts import loss_funcs
 from scripts import z_plot
@@ -12,10 +15,10 @@ from sklearn.model_selection import train_test_split
 
 
 # Begin by reading in the data
-data = util.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_goodss_config.keys_to_keep,
-                      new_column_names=None, get_flux_and_error_keys=False)
+data = scripts.file_handling.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_goodss_config.keys_to_keep,
+                                       new_column_names=None, get_flux_and_error_keys=False)
 
-archival_redshifts = util.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
+archival_redshifts = scripts.file_handling.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
 
 data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68']] = \
     archival_redshifts[['gs4_zspec', 'gs4_zphot', 'gs4_zphot_l68', 'gs4_zphot_u68']]
@@ -27,14 +30,14 @@ band_central_wavelengths = hst_goodss_config.band_central_wavelengths
 
 # Take a look at the coverage in different photometric bands
 data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
-    util.check_photometric_coverage_3dhst(data, flux_keys, error_keys, band_central_wavelengths,
-                                          coverage_minimum=0.5,
-                                          valid_photometry_column='use_phot',
-                                          missing_flux_handling='normalised_column_mean',
-                                          missing_error_handling='big_value')
+    scripts.preprocessing.missing_data_handler(data, flux_keys, error_keys, band_central_wavelengths,
+                                               coverage_minimum=0.5,
+                                               valid_photometry_column='use_phot',
+                                               missing_flux_handling='normalised_column_mean',
+                                               missing_error_handling='big_value')
 
-data_with_spec_z = util.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
-data_with_spec_z = util.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
+data_with_spec_z = scripts.preprocessing.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
+data_with_spec_z = scripts.preprocessing.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
 
 #data_no_spec_z = util.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
 #data_no_spec_z = util.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
