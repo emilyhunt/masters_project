@@ -29,7 +29,7 @@ data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68']] = \
 # Get some useful things from the config file
 flux_keys = hst_goodss_config.flux_keys_in_order
 error_keys = hst_goodss_config.error_keys_in_order
-band_central_wavelengths = hst_goodss_config.band_central_wavelengths
+band_central_wavelengths = hst_goodss_config.band_central_wavelengths.copy()
 
 # Take a look at the coverage in different photometric bands
 data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
@@ -39,8 +39,14 @@ data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
                                                missing_flux_handling='normalised_column_mean_ratio',
                                                missing_error_handling='big_value')
 
-# Convert everything to log fluxes with preprocessing.PhotometryScaler()
+# Add any extra points if we wanna
+data_with_spec_z = preprocessing.enlarge_dataset_within_error(data_with_spec_z, reduced_flux_keys, reduced_error_keys,
+                                                              min_sn=0.0, max_sn=1.0, error_model='uniform',
+                                                              error_correlation='row-wise', outlier_model=None,
+                                                              new_dataset_size_factor=10.)
 
+
+# Convert everything to log fluxes with preprocessing.PhotometryScaler()
 #data_with_spec_z[reduced_flux_keys] = np.where(data_with_spec_z[reduced_flux_keys] < 0.0, 0.0, data_with_spec_z[reduced_flux_keys])
 #data_no_spec_z[reduced_flux_keys] = np.where(data_no_spec_z[reduced_flux_keys] < 0.0, 0.0, data_no_spec_z[reduced_flux_keys])
 
@@ -53,7 +59,7 @@ data_with_spec_z = preprocessor.convert_to_log_fluxes(data_with_spec_z, reduced_
 data_no_spec_z = preprocessor.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
 data_no_spec_z = preprocessor.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
 
-keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]
+keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]  # ty StackExchange
 
 # Split everything into training and validation data sets
 data_training, data_validation = preprocessor.train_validation_split(data_with_spec_z, training_set_size=0.75, seed=42)
@@ -64,8 +70,8 @@ x_validate = data_validation[keys_in_order].values
 y_validate = data_validation['z_spec'].values.reshape(-1, 1)
 
 # Make a network
-run_super_name = '18-12-05_pdf_perturbation'
-run_name = '34_negative_fluxes_are_now_zero_fluxes'
+run_super_name = '18-12-10_error_perturbation'
+run_name = '2_uniform_0.0<sn<1.0_dsize=10.'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 

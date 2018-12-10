@@ -1,6 +1,7 @@
 """All functions for preprocessing input photometric data."""
 
 import numpy as np
+import pandas as pd
 import sys
 from typing import Optional, Union
 
@@ -31,11 +32,14 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
     # Make sure we're using local copies of the flux and error keys
     flux_keys = flux_keys.copy()
     error_keys = error_keys.copy()
+    band_central_wavelengths = band_central_wavelengths.copy()
 
     # Have a look at how many good values are in all columns
     all_columns_to_check = flux_keys + error_keys
     column_coverage = np.zeros(len(all_columns_to_check), dtype=np.float)
-    columns_to_remove = []
+    flux_columns_to_remove = []
+    error_columns_to_remove = []
+    bands_to_remove = []
 
     # Check everything, by looking at:
     # 1. Whether or not they're affected by poor photometry/are stars (use_phot does both of these things)
@@ -62,19 +66,25 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
 
         # Add the column to the naughty list if it isn't good enough
         if column_coverage[band_i] < coverage_minimum:
-            columns_to_remove.append(a_flux_key)
-            columns_to_remove.append(a_error_key)
+            flux_columns_to_remove.append(a_flux_key)
+            error_columns_to_remove.append(a_error_key)
+            bands_to_remove.append(band_i)
 
+    band_central_wavelengths = np.delete(np.asarray(band_central_wavelengths), bands_to_remove)
+
+    # Actually do the removing from the key lists
+    for a_flux_key, a_error_key in zip(flux_columns_to_remove, error_columns_to_remove):
         flux_keys.remove(a_flux_key)
         error_keys.remove(a_error_key)
-        band_central_wavelengths.pop(band_i)
 
     print('{} out of {} columns do not have coverage over {}% on good sources.'
-          .format(len(columns_to_remove), len(flux_keys), coverage_minimum * 100))
+          .format(len(flux_columns_to_remove), len(flux_keys), coverage_minimum * 100))
     print('These were: {}'
-          .format(columns_to_remove))
+          .format(flux_columns_to_remove))
+    print('We also remove the error columns: {}'
+          .format(error_columns_to_remove))
 
-    data = data.drop(columns=columns_to_remove).reset_index(drop=True)
+    data = data.drop(columns=flux_columns_to_remove + error_columns_to_remove).reset_index(drop=True)
 
     # Step 3: Deal with missing photometric data points in one of a number of ways
 
@@ -166,7 +176,7 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
     elif missing_flux_handling == 'normalised_column_mean_ratio':
         print('Dealing with missing data by setting it to the ratio row-normalised mean of columns...')
         # Grab the fluxes that need fixing and make the fixeyness happen!
-        fluxes_to_fix = np.where(data[flux_keys] == -99.0, False, True)
+        fluxes_to_fix = np.where(data[flux_keys] == -99., False, True)
 
         # Set bad values to np.nan before taking means so the mean ignores them
         data[flux_keys] = data[flux_keys].where(fluxes_to_fix, other=np.nan)
@@ -308,6 +318,8 @@ class PhotometryScaler:
         # Set values to inf so the first run will always store new ones
         self.minimum_signal_to_noise = {}
         self.minimum_flux = {}
+        self.maximum_signal_to_noise = {}
+        self.maximum_flux = {}
 
         # We loop over all data frames in all_input_data to find the most extreme point
         for a_data_frame in all_input_data:
@@ -324,7 +336,9 @@ class PhotometryScaler:
                 # Set any errors that are zero to np.nan, then compute the nanmin (which is the minimum but ignores nan)
                 errors = np.where(errors == 0., np.nan, errors)
                 new_minimum_signal_to_noise = np.nanmin(fluxes / errors)
+                new_maximum_signal_to_noise = np.nanmax(fluxes / errors)
                 new_minimum_flux = np.nanmin(fluxes)
+                new_maximum_flux = np.nanmax(fluxes)
 
                 # Only store these values if they're the most extreme we've found so far
                 if a_error_key not in self.minimum_signal_to_noise.keys():
@@ -333,12 +347,24 @@ class PhotometryScaler:
                 elif new_minimum_signal_to_noise < self.minimum_signal_to_noise[a_error_key]:
                     self.minimum_signal_to_noise[a_error_key] = new_minimum_signal_to_noise
 
+                if a_error_key not in self.maximum_signal_to_noise.keys():
+                    self.maximum_signal_to_noise[a_error_key] = new_maximum_signal_to_noise
+
+                elif new_maximum_signal_to_noise < self.maximum_signal_to_noise[a_error_key]:
+                    self.maximum_signal_to_noise[a_error_key] = new_maximum_signal_to_noise
+
                 # Likewise for fluxes
                 if a_flux_key not in self.minimum_flux.keys():
                     self.minimum_flux[a_flux_key] = new_minimum_flux
 
                 elif new_minimum_flux < self.minimum_flux[a_flux_key]:
                     self.minimum_flux[a_flux_key] = new_minimum_flux
+
+                if a_flux_key not in self.maximum_flux.keys():
+                    self.maximum_flux[a_flux_key] = new_maximum_flux
+
+                elif new_maximum_flux < self.maximum_flux[a_flux_key]:
+                    self.maximum_flux[a_flux_key] = new_maximum_flux
 
         # We don't actually care about transforming if the smallest flux is greater than zero. In those cases, we reset
         # it to zero. Otherwise, we subtract a tiny extra amount so that we can never try to take a log(0).
@@ -355,11 +381,11 @@ class PhotometryScaler:
                 self.minimum_signal_to_noise[a_key] -= 0.0001
 
     @staticmethod
-    def train_validation_split(data, training_set_size: float=0.75, seed: Optional[Union[float, int]]=42):
+    def train_validation_split(data, training_set_size: float=0.75, seed: Optional[int]=42):
         """Randomly shuffles and splits the dataset into a training set and a validation set. Preferable for use over
         the sklearn module as it keeps the pandas data frame alive (including all our other information.)
 
-        Args:
+        Args:/
             data (pd.DataFrame): dataset to split.
             training_set_size (float): size of training set to use. Default is 0.75.
             seed (float, int or None): random seed to use when splitting. Default is 42. None will set no seed.
@@ -384,12 +410,97 @@ class PhotometryScaler:
         validation_data = data.iloc[data_indices[training_data_size:]].reset_index(drop=True)
         return [training_data, validation_data]
 
-    def enlarge_dataset_within_error(self, data, min_sn: float=1.0, max_sn: float=2.0):
+    def enlarge_dataset_within_error(self, data, flux_keys: list, error_keys: list,
+                                     min_sn: float = 1.0, max_sn: float = 2.0,
+                                     error_model: str = 'exponential',
+                                     error_correlation: Optional[str] = 'row-wise',
+                                     outlier_model: Optional[str] = None,
+                                     new_dataset_size_factor: float = 10.,
+                                     seed: Optional[int] = 42):
         """Function to create new data perturbed from original data. Can be very useful for artificially adding higher
-        S/N data to the training data set."""
-        pass
+        S/N data to the training data set.
 
-        # todo finish your fucking code you are so lazy lol
+        Implemented error models - 'exponential', 'uniform'
+
+        Implemented error correlations - 'row-wise' or None
+
+        Implemented outlier models - None
+
+        Args:
+            data (pd.DataFrame): data to act on.
+            flux_keys (list of str): names of fluxes in said data frame.
+            error_keys (list of str): names of errors in said data frame.
+            min_sn (float): minimum signal to noise to apply. Default is 1.0.
+            max_sn (float): maximum signal to noise to apply. Must be larger than min_sn. Default is 1.0.
+            error_model (str): frequency of perturbations to apply to model. Default is exponential.
+            error_correlation (str or None): type of correlation to apply to errors. Default is row-wise (so, each row
+                gets multiplied by deviates of the same standard deviation.)
+            outlier_model (None or str): type of model to use to introduce outliers. Default is none. #todo implement?
+            new_dataset_size_factor (float): factor to increase size of dataset by. Default is 10.
+            seed (float, int or None): seed to use for random points. Default is 42.
+
+        Returns:
+            a modified DataFrame with new values added.
+        """
+        # Set the numpy seed
+        if seed is not None:
+            np.random.seed(seed)
+
+        # Get some useful stats
+        n_rows = data.shape[0]
+        n_columns = len(error_keys)
+        new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
+
+        # Decide which rows to pick from by pulling out a list of random rows to use
+        rows_to_use = np.random.randint(0, n_rows, new_dataset_size)
+
+        # Next, let's make a new dataframe to perturb from the original one
+        expanded_data = data.loc[rows_to_use].copy()
+
+        # Pull out some random Gaussian values to multiply our lovely values with - we clip negative std deviations to zero.
+        gaussian_deviates = np.random.normal(loc=0.0, scale=np.clip(expanded_data[error_keys].values, 0., None),
+                                             size=(new_dataset_size, n_columns))
+
+        # Decide on the scheme of signal to noise perturbation to use
+        if error_correlation == 'row-wise':
+            signal_to_noise_shape = (new_dataset_size, 1)
+
+        elif error_correlation is None:
+            signal_to_noise_shape = (new_dataset_size, n_columns)
+
+        else:
+            raise ValueError('error correlation of type "{}" not implemented!'.format(error_correlation))
+
+        # Create signal to noise deviates by drawing from different distributions:
+
+        # EXPONENTIAL - we set the inverse rate parameter 1/lambda to half the difference between the minimum and
+        # maximum sn, meaning that ~63% of points are within min_sn < x < max_sn. Exponential distributions inherently
+        # always allow a tiny number of big points, this is the best compromise though (probably.) The mean signal to
+        # noise deviate will be max_sn - min_sn.
+        if error_model == 'exponential':
+            signal_to_noise_multipliers = (np.random.exponential(scale=max_sn - min_sn, size=signal_to_noise_shape)
+                                           + min_sn)
+
+        # UNIFORM - does what it says on the tin. Uniform sn deviates in the range min_sn < x < max_sn.
+        elif error_model == 'uniform':
+            signal_to_noise_multipliers = (max_sn - min_sn) * np.random.random(size=signal_to_noise_shape) + min_sn
+
+        else:
+            raise ValueError('specified error model "{}" not implemented!')
+
+        # And now to perturb the heck outta this guy
+        expanded_data[flux_keys] = np.clip(expanded_data[flux_keys] + gaussian_deviates * signal_to_noise_multipliers)
+
+        # If the minimum signal to noise is less than one, then we won't be idiots and imply that the underlying data
+        # will actually genuinely have error that's less than the original quoted errors
+        expanded_data[error_keys] = (expanded_data[error_keys].values * np.clip(signal_to_noise_multipliers,
+                                                                                a_min=1., a_max=None))
+
+        # Record the extent to which we messed with things in a new column (we take the mean applied to each row so that
+        # None type error correlation doesn't record a stupidly big new column.
+        expanded_data['mean_sn_perturbation'] = np.mean(signal_to_noise_multipliers, axis=1)
+
+        return expanded_data
 
     def convert_to_log_sn_errors(self, data, flux_keys: list, error_keys: list):
         """Function for re-scaling errors to be in log signal to noise ratio space, which ought to be better to train on.

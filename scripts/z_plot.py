@@ -488,7 +488,7 @@ def error_evaluator_wittman(spectroscopic_z, validation_mixtures, validation_res
 
     cdfs_summed = np.linspace(0., 1., num=cdfs_sorted.size)
 
-    residuals = np.log(np.cosh((cdfs_summed - cdfs_sorted)))
+    residuals = (cdfs_summed - cdfs_sorted)**2
     mean_residual = np.mean(residuals)
     max_residual = np.max(residuals)
 
