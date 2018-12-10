@@ -39,39 +39,40 @@ data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
                                                missing_flux_handling='normalised_column_mean_ratio',
                                                missing_error_handling='big_value')
 
-# Add any extra points if we wanna
-data_with_spec_z = preprocessing.enlarge_dataset_within_error(data_with_spec_z, reduced_flux_keys, reduced_error_keys,
-                                                              min_sn=0.0, max_sn=1.0, error_model='uniform',
-                                                              error_correlation='row-wise', outlier_model=None,
-                                                              new_dataset_size_factor=10.)
-
-
-# Convert everything to log fluxes with preprocessing.PhotometryScaler()
-#data_with_spec_z[reduced_flux_keys] = np.where(data_with_spec_z[reduced_flux_keys] < 0.0, 0.0, data_with_spec_z[reduced_flux_keys])
-#data_no_spec_z[reduced_flux_keys] = np.where(data_no_spec_z[reduced_flux_keys] < 0.0, 0.0, data_no_spec_z[reduced_flux_keys])
-
+# Initialise a PhotometryScaler to use to log scale etc everything in the same way
 preprocessor = preprocessing.PhotometryScaler([data_with_spec_z, data_no_spec_z],
                                               reduced_flux_keys, reduced_error_keys)
-
-data_with_spec_z = preprocessor.convert_to_log_sn_errors(data_with_spec_z, reduced_flux_keys, reduced_error_keys)
-data_with_spec_z = preprocessor.convert_to_log_fluxes(data_with_spec_z, reduced_flux_keys)
-
-data_no_spec_z = preprocessor.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
-data_no_spec_z = preprocessor.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
-
-keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]  # ty StackExchange
 
 # Split everything into training and validation data sets
 data_training, data_validation = preprocessor.train_validation_split(data_with_spec_z, training_set_size=0.75, seed=42)
 
+# Make some extra data to use in a moment
+data_training = preprocessor.enlarge_dataset_within_error(data_training, reduced_flux_keys, reduced_error_keys,
+                                                          min_sn=0.0, max_sn=2.0, error_model='uniform',
+                                                          error_correlation='row-wise', outlier_model=None,
+                                                          new_dataset_size_factor=5.)
+
+#data_validation = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
+#                                                          min_sn=0.0, max_sn=1.0, error_model='uniform',
+#                                                          error_correlation='row-wise', outlier_model=None,
+#                                                          new_dataset_size_factor=10.)
+
+# Convert everything that matters to log fluxes
+data_training = preprocessor.convert_to_log_sn_errors(data_training, reduced_flux_keys, reduced_error_keys)
+data_training = preprocessor.convert_to_log_fluxes(data_training, reduced_flux_keys)
+
+data_no_spec_z = preprocessor.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
+data_no_spec_z = preprocessor.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
+
+
+# Grab keys in order and make final training/validation arrays
+keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]  # ty StackExchange
 x_train = data_training[keys_in_order].values
 y_train = data_training['z_spec'].values.reshape(-1, 1)
-x_validate = data_validation[keys_in_order].values
-y_validate = data_validation['z_spec'].values.reshape(-1, 1)
 
 # Make a network
 run_super_name = '18-12-10_error_perturbation'
-run_name = '2_uniform_0.0<sn<1.0_dsize=10.'
+run_name = '6_uniform_0.0<sn<2.0_dsize=5'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -104,39 +105,55 @@ network.set_training_data(x_train, y_train)
 # Run this thing!
 exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.16, max_epochs_without_report=25)
 
-# network.plot_loss_function_evolution()
+# Validate the network at different signal to noise mutliplier levels
+sn_multipliers = [0.0, 1.0, 2.0, 3.0, 4.0]
 
-network.set_validation_data(x_validate, y_validate)
+for a_sn in sn_multipliers:
+    data_validation_temp = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
+                                                                min_sn=a_sn, max_sn=a_sn, error_model='uniform',
+                                                                error_correlation='row-wise', outlier_model=None,
+                                                                new_dataset_size_factor=None)
 
-validation_mixtures = network.validate()
-validation_results = network.calculate_validation_stats(validation_mixtures, [0, 7])
+    a_sn = '_sn=' + str(a_sn)
 
-network.plot_pdf(validation_mixtures, [10, 100, 200, 300, 400, 500],
-                 map_values=validation_results['map'],
-                 true_values=y_validate.flatten(),
-                 figure_directory=run_dir)
+    data_validation_temp = preprocessor.convert_to_log_sn_errors(data_validation_temp, reduced_flux_keys, reduced_error_keys)
+    data_validation_temp = preprocessor.convert_to_log_fluxes(data_validation_temp, reduced_flux_keys)
 
-overall_nmad = z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=True,
-                                   limits=[0, 7],
-                                   save_name=run_dir + 'phot_vs_spec.png',
-                                   plt_title=run_name)
+    x_validate = data_validation_temp[keys_in_order].values
+    y_validate = data_validation_temp['z_spec'].values.reshape(-1, 1)
 
-valid_map_values = util.where_valid_redshifts(validation_results['map'])
-z_plot.error_evaluator(y_validate.flatten(), validation_results['map'],
-                       validation_results['lower'], validation_results['upper'], show_fig=True,
-                       save_name=run_dir + 'errors.png',
-                       plt_title=run_name)
+    network.set_validation_data(x_validate, y_validate)
 
-mean_residual, max_residual = z_plot.error_evaluator_wittman(y_validate.flatten(),
-                                                             validation_mixtures, validation_results, show_fig=True,
-                                                             save_name=run_dir + 'wittman_errors.png',
-                                                             plt_title=run_name)
+    validation_mixtures = network.validate()
+    validation_results = network.calculate_validation_stats(validation_mixtures, [0, 7])
+
+    network.plot_pdf(validation_mixtures, [10, 100, 200, 300, 400, 500],
+                     map_values=validation_results['map'],
+                     true_values=y_validate.flatten(),
+                     figure_directory=run_dir)
+
+    overall_nmad = z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=False,
+                                       limits=[0, 7],
+                                       save_name=run_dir + 'phot_vs_spec' + a_sn + '.png',
+                                       plt_title=run_name + a_sn)
+
+    valid_map_values = util.where_valid_redshifts(validation_results['map'])
+    z_plot.error_evaluator(y_validate.flatten(), validation_results['map'],
+                           validation_results['lower'], validation_results['upper'], show_fig=False,
+                           save_name=run_dir + 'errors' + a_sn + '.png',
+                           plt_title=run_name + a_sn)
+
+    mean_residual, max_residual = z_plot.error_evaluator_wittman(y_validate.flatten(),
+                                                                 validation_mixtures, validation_results, show_fig=False,
+                                                                 save_name=run_dir + 'wittman_errors' + a_sn + '.png',
+                                                                 plt_title=run_name + a_sn)
 
 """
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
-validation_results_no_spec_z = network.calculate_validation_stats(validation_mixtures_no_spec_z)
+validation_results_no_spec_z = network.calculate_validation_stats(validation_mixtures_no_spec_z,  [0, 7],
+                                                                  reporting_interval=1000)
 
 valid_map_values = util.where_valid_redshifts(validation_results_no_spec_z['map'])
 all_galaxy_pairs, random_galaxy_pairs = galaxy_pairs.store_pairs_on_sky(data_no_spec_z['ra'].iloc[valid_map_values],

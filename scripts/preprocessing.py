@@ -315,14 +315,13 @@ class PhotometryScaler:
             flux_keys (list of str): all fluxes that can be found in said input data.
             error_keys (list of str): all flux errors that can be found in said input data.
         """
-        # Set values to inf so the first run will always store new ones
-        self.minimum_signal_to_noise = {}
-        self.minimum_flux = {}
-        self.maximum_signal_to_noise = {}
-        self.maximum_flux = {}
+        # Set values to inf so the first run will always store new ones, and store everything in a data frame
+        self.photometry_stats = pd.DataFrame(np.inf * np.ones((len(flux_keys), 4)),
+                                             columns=['minimum_flux', 'maximum_flux', 'minimum_sn', 'maximum_sn'],
+                                             index=flux_keys)
 
         # We loop over all data frames in all_input_data to find the most extreme point
-        for a_data_frame in all_input_data:
+        for a_data_frame_i, a_data_frame in enumerate(all_input_data):
             for a_flux_key, a_error_key in zip(flux_keys, error_keys):
                 # Firstly, let's record the absolute smallest signal to noise ratio (it may well be negative)
                 fluxes = a_data_frame[a_flux_key].values
@@ -341,44 +340,24 @@ class PhotometryScaler:
                 new_maximum_flux = np.nanmax(fluxes)
 
                 # Only store these values if they're the most extreme we've found so far
-                if a_error_key not in self.minimum_signal_to_noise.keys():
-                    self.minimum_signal_to_noise[a_error_key] = new_minimum_signal_to_noise
+                if new_minimum_signal_to_noise < self.photometry_stats.loc[a_flux_key, 'minimum_sn']:
+                    self.photometry_stats.loc[a_flux_key, 'minimum_sn'] = new_minimum_signal_to_noise
 
-                elif new_minimum_signal_to_noise < self.minimum_signal_to_noise[a_error_key]:
-                    self.minimum_signal_to_noise[a_error_key] = new_minimum_signal_to_noise
-
-                if a_error_key not in self.maximum_signal_to_noise.keys():
-                    self.maximum_signal_to_noise[a_error_key] = new_maximum_signal_to_noise
-
-                elif new_maximum_signal_to_noise < self.maximum_signal_to_noise[a_error_key]:
-                    self.maximum_signal_to_noise[a_error_key] = new_maximum_signal_to_noise
+                if new_maximum_signal_to_noise < self.photometry_stats.loc[a_flux_key, 'maximum_sn']:
+                    self.photometry_stats.loc[a_flux_key, 'maximum_sn'] = new_maximum_signal_to_noise
 
                 # Likewise for fluxes
-                if a_flux_key not in self.minimum_flux.keys():
-                    self.minimum_flux[a_flux_key] = new_minimum_flux
+                if new_minimum_flux < self.photometry_stats.loc[a_flux_key, 'minimum_flux']:
+                    self.photometry_stats.loc[a_flux_key, 'minimum_flux'] = new_minimum_flux
 
-                elif new_minimum_flux < self.minimum_flux[a_flux_key]:
-                    self.minimum_flux[a_flux_key] = new_minimum_flux
-
-                if a_flux_key not in self.maximum_flux.keys():
-                    self.maximum_flux[a_flux_key] = new_maximum_flux
-
-                elif new_maximum_flux < self.maximum_flux[a_flux_key]:
-                    self.maximum_flux[a_flux_key] = new_maximum_flux
+                if new_maximum_flux < self.photometry_stats.loc[a_flux_key, 'maximum_flux']:
+                    self.photometry_stats.loc[a_flux_key, 'maximum_flux'] = new_maximum_flux
 
         # We don't actually care about transforming if the smallest flux is greater than zero. In those cases, we reset
         # it to zero. Otherwise, we subtract a tiny extra amount so that we can never try to take a log(0).
-        for a_key in self.minimum_flux.keys():
-            if self.minimum_flux[a_key] > 0:
-                self.minimum_flux[a_key] = 0
-            else:
-                self.minimum_flux[a_key] -= 0.0001
-
-        for a_key in self.minimum_signal_to_noise.keys():
-            if self.minimum_signal_to_noise[a_key] > 0:
-                self.minimum_signal_to_noise[a_key] = 0
-            else:
-                self.minimum_signal_to_noise[a_key] -= 0.0001
+        self.photometry_stats[['minimum_flux', 'minimum_sn']] = \
+            np.where(self.photometry_stats[['minimum_flux', 'minimum_sn']] > 0, 0.,
+                     self.photometry_stats[['minimum_flux', 'minimum_sn']] - 0.0001)
 
     @staticmethod
     def train_validation_split(data, training_set_size: float=0.75, seed: Optional[int]=42):
@@ -415,7 +394,7 @@ class PhotometryScaler:
                                      error_model: str = 'exponential',
                                      error_correlation: Optional[str] = 'row-wise',
                                      outlier_model: Optional[str] = None,
-                                     new_dataset_size_factor: float = 10.,
+                                     new_dataset_size_factor: Optional[float] = 10.,
                                      seed: Optional[int] = 42):
         """Function to create new data perturbed from original data. Can be very useful for artificially adding higher
         S/N data to the training data set.
@@ -442,6 +421,7 @@ class PhotometryScaler:
         Returns:
             a modified DataFrame with new values added.
         """
+
         # Set the numpy seed
         if seed is not None:
             np.random.seed(seed)
@@ -449,10 +429,14 @@ class PhotometryScaler:
         # Get some useful stats
         n_rows = data.shape[0]
         n_columns = len(error_keys)
-        new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
 
         # Decide which rows to pick from by pulling out a list of random rows to use
-        rows_to_use = np.random.randint(0, n_rows, new_dataset_size)
+        if new_dataset_size_factor is not None:
+            new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
+            rows_to_use = np.random.randint(0, n_rows, new_dataset_size)
+        else:
+            new_dataset_size = n_rows
+            rows_to_use = np.arange(0, n_rows)
 
         # Next, let's make a new dataframe to perturb from the original one
         expanded_data = data.loc[rows_to_use].copy()
@@ -488,19 +472,31 @@ class PhotometryScaler:
         else:
             raise ValueError('specified error model "{}" not implemented!')
 
-        # And now to perturb the heck outta this guy
-        expanded_data[flux_keys] = np.clip(expanded_data[flux_keys] + gaussian_deviates * signal_to_noise_multipliers)
+        # And now to perturb the heck outta this guy, clipping it to not be less than the pre-existing minimum flux in
+        # that column.
+        expanded_data[flux_keys] = np.clip(expanded_data[flux_keys].values
+                                           + gaussian_deviates * signal_to_noise_multipliers,
+                                           a_min=self.photometry_stats['minimum_flux'].values, a_max=None)
 
         # If the minimum signal to noise is less than one, then we won't be idiots and imply that the underlying data
         # will actually genuinely have error that's less than the original quoted errors
         expanded_data[error_keys] = (expanded_data[error_keys].values * np.clip(signal_to_noise_multipliers,
                                                                                 a_min=1., a_max=None))
 
+        # Clip any errors that have signal to noise ratios that are too small, by calculating an error that doesn't
+        # result in too small errors by using error = flux / s_n_ratio
+        expanded_data[error_keys] = np.where(
+            expanded_data[flux_keys].values / expanded_data[error_keys].values
+            < self.photometry_stats['minimum_sn'].values,
+            expanded_data[flux_keys].values / self.photometry_stats['minimum_sn'].values + 0.0001,
+            expanded_data[error_keys])
+
         # Record the extent to which we messed with things in a new column (we take the mean applied to each row so that
         # None type error correlation doesn't record a stupidly big new column.
         expanded_data['mean_sn_perturbation'] = np.mean(signal_to_noise_multipliers, axis=1)
 
-        return expanded_data
+        # Reset the index and return
+        return expanded_data.reset_index(drop=True)
 
     def convert_to_log_sn_errors(self, data, flux_keys: list, error_keys: list):
         """Function for re-scaling errors to be in log signal to noise ratio space, which ought to be better to train on.
@@ -530,7 +526,7 @@ class PhotometryScaler:
             sig_noise = np.where(sig_noise == -1., np.max(sig_noise), sig_noise)
 
             # Take the log and save it, being careful to not take a log of a negative number if there are any.
-            log_sig_noise = np.log(sig_noise - self.minimum_signal_to_noise[a_error_key])
+            log_sig_noise = np.log(sig_noise - self.photometry_stats.loc[a_flux_key, 'minimum_sn'])
 
             # Set any pathetically small values from 0 signal to noise to a smol number (this shouldn't need to get
             # called but has on rare occasions been needed)
@@ -563,7 +559,7 @@ class PhotometryScaler:
                 raise ValueError('some fluxes in band {} were invalid!'.format(a_flux_key))
 
             # Set the minimum to 0.0001 and take a log
-            log_fluxes = np.log(data[a_flux_key] - self.minimum_flux[a_flux_key])
+            log_fluxes = np.log(data[a_flux_key] - self.photometry_stats.loc[a_flux_key, 'minimum_flux'])
 
             # Set any pathetically small values from 0 flux to a smol number (this shouldn't need to get
             # called but has on rare occasions been needed)
