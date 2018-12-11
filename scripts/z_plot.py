@@ -15,6 +15,10 @@ from scipy.stats import norm as scipy_normal
 from scripts.util import single_gaussian_to_fit, double_gaussian_to_fit, fit_gaussians
 
 
+# Stop plots from popping up constantly when being updated (turn back on with plt.ion() for console plotting fun.)
+plt.ioff()
+
+
 def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins: int=5, point_alpha: float=0.2,
                  point_color='r', limits=None,
                  plt_title: Optional[str]=None, save_name: Optional[str]=None, show_fig: bool=False,

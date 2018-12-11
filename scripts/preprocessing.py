@@ -72,17 +72,17 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
 
     band_central_wavelengths = np.delete(np.asarray(band_central_wavelengths), bands_to_remove)
 
-    # Actually do the removing from the key lists
-    for a_flux_key, a_error_key in zip(flux_columns_to_remove, error_columns_to_remove):
-        flux_keys.remove(a_flux_key)
-        error_keys.remove(a_error_key)
-
     print('{} out of {} columns do not have coverage over {}% on good sources.'
           .format(len(flux_columns_to_remove), len(flux_keys), coverage_minimum * 100))
     print('These were: {}'
           .format(flux_columns_to_remove))
     print('We also remove the error columns: {}'
           .format(error_columns_to_remove))
+
+    # Actually do the removing from the key lists
+    for a_flux_key, a_error_key in zip(flux_columns_to_remove, error_columns_to_remove):
+        flux_keys.remove(a_flux_key)
+        error_keys.remove(a_error_key)
 
     data = data.drop(columns=flux_columns_to_remove + error_columns_to_remove).reset_index(drop=True)
 
@@ -183,7 +183,7 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
 
         # Take the mean of each column, then stretch it to be as long as the data itself (and grab the overall mean too)
         column_means = np.nanmean(np.asarray(data[flux_keys]), axis=0)
-        overall_mean = np.nanmean(column_means)
+        overall_mean = np.nanmean(np.asarray(data[flux_keys]))
         column_means = np.repeat(column_means.reshape(1, -1), data.shape[0], axis=0)
 
         # Take the mean of each row, then reshape it into a vertical array and make it horizontally as wide as the
@@ -280,14 +280,39 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
 
     elif missing_error_handling == 'big_value':
         print('Dealing with missing errors by setting them to a large value...')
+        # Grab the errors that need fixing and make the fixeyness happen!
+        errors_to_fix = np.where(data[flux_keys] == -99., False, True)
+
+        # Set bad values to np.nan before taking means so the mean ignores them
+        data[flux_keys] = data[flux_keys].where(errors_to_fix, other=np.nan)
+
         # Set it to 1000 times the maximum error in the catalogue
-        the_big_number = np.max(np.asarray(data[error_keys])) * 1000
+        the_big_number = np.nanmax(np.asarray(data[error_keys])) * 1000
 
         # Grab the fluxes that need fixing and make the fixeyness happen!
-        errors_to_fix = np.where(data[error_keys] == -99.0, False, True)
         data[error_keys] = data[error_keys].where(errors_to_fix, other=the_big_number)
         print('{} of {} errors were modified to a value of {}.'
               .format(errors_to_fix.size - np.count_nonzero(errors_to_fix), errors_to_fix.size, the_big_number))
+
+    elif 'sigma_column' in missing_error_handling:
+        # Get the sigma level from the string (which could be e.g. "5_sigma_column")
+        sigma_level = float(missing_error_handling[:-13])
+        print('Dealing with missing errors by setting them to {} times the median error in that band...'
+              .format(sigma_level))
+
+        # Grab the errors that need fixing and make the fixeyness happen!
+        errors_to_fix = np.where(data[flux_keys] == -99., False, True)
+
+        # Set bad values to np.nan before taking means so the mean ignores them (we also reshape so pandas.where works)
+        data[flux_keys] = data[flux_keys].where(errors_to_fix, other=np.nan)
+        column_means = np.nanmedian(np.asarray(data[error_keys]), axis=0) * sigma_level
+        column_means = np.repeat(column_means.reshape(1, -1), data.shape[0], axis=0)
+
+        # Grab the fluxes that need fixing and make the fixeyness happen!
+        errors_to_fix = np.where(data[error_keys] == -99.0, False, True)
+        data[error_keys] = data[error_keys].where(errors_to_fix, other=column_means)
+        print('{} of {} errors were modified'
+              .format(errors_to_fix.size - np.count_nonzero(errors_to_fix), errors_to_fix.size))
 
     else:
         raise ValueError('specified missing_error_handling not found/implemented/supported.')
@@ -316,12 +341,17 @@ class PhotometryScaler:
             error_keys (list of str): all flux errors that can be found in said input data.
         """
         # Set values to inf so the first run will always store new ones, and store everything in a data frame
-        self.photometry_stats = pd.DataFrame(np.inf * np.ones((len(flux_keys), 4)),
-                                             columns=['minimum_flux', 'maximum_flux', 'minimum_sn', 'maximum_sn'],
+        self.photometry_stats = pd.DataFrame(np.inf * np.ones((len(flux_keys), 5)),
+                                             columns=['minimum_flux', 'maximum_flux', 'minimum_sn', 'maximum_sn',
+                                                      'mean_error'],
                                              index=flux_keys)
+
+        first_run = True
+        dict_of_all_errors = {}
 
         # We loop over all data frames in all_input_data to find the most extreme point
         for a_data_frame_i, a_data_frame in enumerate(all_input_data):
+            n_objects_this_frame = a_data_frame.shape[0]
             for a_flux_key, a_error_key in zip(flux_keys, error_keys):
                 # Firstly, let's record the absolute smallest signal to noise ratio (it may well be negative)
                 fluxes = a_data_frame[a_flux_key].values
@@ -333,9 +363,9 @@ class PhotometryScaler:
                     raise ValueError('some fluxes were invalid!')
 
                 # Set any errors that are zero to np.nan, then compute the nanmin (which is the minimum but ignores nan)
-                errors = np.where(errors == 0., np.nan, errors)
-                new_minimum_signal_to_noise = np.nanmin(fluxes / errors)
-                new_maximum_signal_to_noise = np.nanmax(fluxes / errors)
+                nan_errors = np.where(errors == 0., np.nan, errors)
+                new_minimum_signal_to_noise = np.nanmin(fluxes / nan_errors)
+                new_maximum_signal_to_noise = np.nanmax(fluxes / nan_errors)
                 new_minimum_flux = np.nanmin(fluxes)
                 new_maximum_flux = np.nanmax(fluxes)
 
@@ -352,6 +382,21 @@ class PhotometryScaler:
 
                 if new_maximum_flux < self.photometry_stats.loc[a_flux_key, 'maximum_flux']:
                     self.photometry_stats.loc[a_flux_key, 'maximum_flux'] = new_maximum_flux
+
+                # Record mean errors by multiplying the current mean error by how many objects that came from, plus the
+                # mean error of the current data multiplied by how many objects there are, all divided by the total
+                # number of objects. I guess you could say it's a mean mean. ;)
+                if first_run:
+                    dict_of_all_errors[a_flux_key] = errors
+                else:
+                    dict_of_all_errors[a_flux_key] = np.append(dict_of_all_errors[a_flux_key], errors)
+
+            # Reset first run tag so we now append errors to dicts instead
+            first_run = False
+
+        # Calculate medians  # todo: rename all this shit to median not mean lol
+        for a_flux_key in flux_keys:
+            self.photometry_stats.loc[a_flux_key, 'mean_error'] = np.nanmedian(dict_of_all_errors[a_flux_key])
 
         # We don't actually care about transforming if the smallest flux is greater than zero. In those cases, we reset
         # it to zero. Otherwise, we subtract a tiny extra amount so that we can never try to take a log(0).
@@ -395,6 +440,8 @@ class PhotometryScaler:
                                      error_correlation: Optional[str] = 'row-wise',
                                      outlier_model: Optional[str] = None,
                                      new_dataset_size_factor: Optional[float] = 10.,
+                                     clip_fluxes: bool=True,
+                                     clip_errors: bool=True,
                                      seed: Optional[int] = 42):
         """Function to create new data perturbed from original data. Can be very useful for artificially adding higher
         S/N data to the training data set.
@@ -416,6 +463,10 @@ class PhotometryScaler:
                 gets multiplied by deviates of the same standard deviation.)
             outlier_model (None or str): type of model to use to introduce outliers. Default is none. #todo implement?
             new_dataset_size_factor (float): factor to increase size of dataset by. Default is 10.
+            clip_fluxes (bool): whether or not to ensure no fluxes are less than band minimums. Necessary for log
+                methods. Default is True.
+            clip_errors (bool): whether or not to ensure no fluxes are less than band minimums. Necessary for log
+                methods. Default is True.
             seed (float, int or None): seed to use for random points. Default is 42.
 
         Returns:
@@ -474,9 +525,13 @@ class PhotometryScaler:
 
         # And now to perturb the heck outta this guy, clipping it to not be less than the pre-existing minimum flux in
         # that column.
+        if clip_fluxes:
+            minimum_fluxes = self.photometry_stats['minimum_flux'].values
+        else:
+            minimum_fluxes = -np.inf
         expanded_data[flux_keys] = np.clip(expanded_data[flux_keys].values
                                            + gaussian_deviates * signal_to_noise_multipliers,
-                                           a_min=self.photometry_stats['minimum_flux'].values, a_max=None)
+                                           a_min=minimum_fluxes, a_max=None)
 
         # If the minimum signal to noise is less than one, then we won't be idiots and imply that the underlying data
         # will actually genuinely have error that's less than the original quoted errors
@@ -485,11 +540,12 @@ class PhotometryScaler:
 
         # Clip any errors that have signal to noise ratios that are too small, by calculating an error that doesn't
         # result in too small errors by using error = flux / s_n_ratio
-        expanded_data[error_keys] = np.where(
-            expanded_data[flux_keys].values / expanded_data[error_keys].values
-            < self.photometry_stats['minimum_sn'].values,
-            expanded_data[flux_keys].values / self.photometry_stats['minimum_sn'].values + 0.0001,
-            expanded_data[error_keys])
+        if clip_errors:
+            expanded_data[error_keys] = np.where(
+                expanded_data[flux_keys].values / expanded_data[error_keys].values
+                < self.photometry_stats['minimum_sn'].values,
+                expanded_data[flux_keys].values / self.photometry_stats['minimum_sn'].values + 0.0001,
+                expanded_data[error_keys])
 
         # Record the extent to which we messed with things in a new column (we take the mean applied to each row so that
         # None type error correlation doesn't record a stupidly big new column.
@@ -564,5 +620,34 @@ class PhotometryScaler:
             # Set any pathetically small values from 0 flux to a smol number (this shouldn't need to get
             # called but has on rare occasions been needed)
             data[a_flux_key] = np.where(log_fluxes == -np.inf, -700., log_fluxes)
+
+        return data
+
+    def convert_to_asinh_magnitudes(self, data, flux_keys):
+        """Converts fluxes to Lupton+1999 asinh magnitudes. Can help to make the flux distribution more Gaussian, which
+        may help with training. The asinh magnitude can handle negative fluxes!
+
+        Args:
+            data (pd.DataFrame): dataframe to act on.
+            flux_keys (list of str): list of flux keys, in order.
+
+        Returns:
+            The edited data frame :)
+        """
+        # Grab Pogson's ratio (about 1.08 but I'm being precise for fun)
+        pogson_ratio = 2.5 * np.log10(np.e)
+
+        # Cycle over flux bands
+        for a_flux_key in flux_keys:
+
+            # Check we haven't been passed any incorrect values (that would fuck the log right up lol)
+            bad_fluxes = np.count_nonzero(np.where(data[a_flux_key] == -99., True, False))
+            if bad_fluxes > 0:
+                raise ValueError('some fluxes in band {} were invalid!'.format(a_flux_key))
+
+            # Grab b (the softening parameter: the sqrt of the Pogson ratio multiplied by the mean 1 sigma error in this
+            # band
+            b = np.sqrt(pogson_ratio) * self.photometry_stats.loc[a_flux_key, 'mean_error']
+            data[a_flux_key] = -1. * pogson_ratio * (np.arcsinh(data[a_flux_key] / (2*b)) + np.log(b))
 
         return data

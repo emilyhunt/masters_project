@@ -23,7 +23,7 @@ data = scripts.file_handling.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_
 
 archival_redshifts = scripts.file_handling.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
 
-data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68']] = \
+data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68', 'z_grism', 'z_grism_l68', 'z_grism_u68']] = \
     archival_redshifts[['gs4_zspec', 'gs4_zphot', 'gs4_zphot_l68', 'gs4_zphot_u68']]
 
 # Get some useful things from the config file
@@ -37,7 +37,7 @@ data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
                                                coverage_minimum=0.5,
                                                valid_photometry_column='use_phot',
                                                missing_flux_handling='normalised_column_mean_ratio',
-                                               missing_error_handling='big_value')
+                                               missing_error_handling='5_sigma_column')
 
 # Initialise a PhotometryScaler to use to log scale etc everything in the same way
 preprocessor = preprocessing.PhotometryScaler([data_with_spec_z, data_no_spec_z],
@@ -48,9 +48,9 @@ data_training, data_validation = preprocessor.train_validation_split(data_with_s
 
 # Make some extra data to use in a moment
 data_training = preprocessor.enlarge_dataset_within_error(data_training, reduced_flux_keys, reduced_error_keys,
-                                                          min_sn=0.0, max_sn=2.0, error_model='uniform',
+                                                          min_sn=0.0, max_sn=2.0, error_model='exponential',
                                                           error_correlation='row-wise', outlier_model=None,
-                                                          new_dataset_size_factor=5.)
+                                                          new_dataset_size_factor=5., clip_fluxes=False)
 
 #data_validation = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
 #                                                          min_sn=0.0, max_sn=1.0, error_model='uniform',
@@ -59,10 +59,10 @@ data_training = preprocessor.enlarge_dataset_within_error(data_training, reduced
 
 # Convert everything that matters to log fluxes
 data_training = preprocessor.convert_to_log_sn_errors(data_training, reduced_flux_keys, reduced_error_keys)
-data_training = preprocessor.convert_to_log_fluxes(data_training, reduced_flux_keys)
+data_training = preprocessor.convert_to_asinh_magnitudes(data_training, reduced_flux_keys)
 
 data_no_spec_z = preprocessor.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
-data_no_spec_z = preprocessor.convert_to_log_fluxes(data_no_spec_z, reduced_flux_keys)
+data_no_spec_z = preprocessor.convert_to_asinh_magnitudes(data_no_spec_z, reduced_flux_keys)
 
 
 # Grab keys in order and make final training/validation arrays
@@ -72,7 +72,7 @@ y_train = data_training['z_spec'].values.reshape(-1, 1)
 
 # Make a network
 run_super_name = '18-12-10_error_perturbation'
-run_name = '6_uniform_0.0<sn<2.0_dsize=5'
+run_name = '18_exponential_ecorr=row-wise_pc=0.0370'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -84,7 +84,7 @@ except FileExistsError:
 #loss_function = loss_funcs.NormalCDFLoss(cdf_strength=0.00, std_deviation_strength=0.0, normalisation_strength=1.0,
 #                                         grid_size=100, mixtures=5)
 
-loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient=0.0385)
+loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient=0.0370)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
@@ -103,7 +103,7 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.16, max_epochs_without_report=25)
+exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.7, max_epochs_without_report=100)
 
 # Validate the network at different signal to noise mutliplier levels
 sn_multipliers = [0.0, 1.0, 2.0, 3.0, 4.0]
@@ -112,12 +112,12 @@ for a_sn in sn_multipliers:
     data_validation_temp = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
                                                                 min_sn=a_sn, max_sn=a_sn, error_model='uniform',
                                                                 error_correlation='row-wise', outlier_model=None,
-                                                                new_dataset_size_factor=None)
+                                                                new_dataset_size_factor=None, clip_fluxes=False)
 
     a_sn = '_sn=' + str(a_sn)
 
     data_validation_temp = preprocessor.convert_to_log_sn_errors(data_validation_temp, reduced_flux_keys, reduced_error_keys)
-    data_validation_temp = preprocessor.convert_to_log_fluxes(data_validation_temp, reduced_flux_keys)
+    data_validation_temp = preprocessor.convert_to_asinh_magnitudes(data_validation_temp, reduced_flux_keys)
 
     x_validate = data_validation_temp[keys_in_order].values
     y_validate = data_validation_temp['z_spec'].values.reshape(-1, 1)
@@ -130,7 +130,7 @@ for a_sn in sn_multipliers:
     network.plot_pdf(validation_mixtures, [10, 100, 200, 300, 400, 500],
                      map_values=validation_results['map'],
                      true_values=y_validate.flatten(),
-                     figure_directory=run_dir)
+                     figure_directory=run_dir + a_sn)
 
     overall_nmad = z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=False,
                                        limits=[0, 7],
@@ -148,12 +148,18 @@ for a_sn in sn_multipliers:
                                                                  save_name=run_dir + 'wittman_errors' + a_sn + '.png',
                                                                  plt_title=run_name + a_sn)
 
-"""
+
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
 validation_results_no_spec_z = network.calculate_validation_stats(validation_mixtures_no_spec_z,  [0, 7],
                                                                   reporting_interval=1000)
+
+overall_nmad = z_plot.phot_vs_spec(data_no_spec_z['z_phot_lit'], validation_results_no_spec_z['map'], show_nmad=True,
+                                   show_fig=False,
+                                   limits=[0, 7],
+                                   save_name=run_dir + 'phot_vs_EAZY.png',
+                                   plt_title=run_name, point_alpha=0.02, point_color='b')
 
 valid_map_values = util.where_valid_redshifts(validation_results_no_spec_z['map'])
 all_galaxy_pairs, random_galaxy_pairs = galaxy_pairs.store_pairs_on_sky(data_no_spec_z['ra'].iloc[valid_map_values],
@@ -163,6 +169,26 @@ all_galaxy_pairs, random_galaxy_pairs = galaxy_pairs.store_pairs_on_sky(data_no_
                                                                         size_of_random_catalogue=1.0,
                                                                         all_pairs_name='all_pairs.csv',
                                                                         random_pairs_name='random_pairs.csv')
+
+network.plot_pdf(validation_mixtures_no_spec_z, np.arange(0, 20),
+                 map_values=validation_results_no_spec_z['map'],
+                 true_values=data_no_spec_z['z_phot_lit'],
+                 figure_directory=run_dir + 'test_dataset')
+
+network.plot_pdf(validation_mixtures_no_spec_z, np.arange(10000, 10020),
+                 map_values=validation_results_no_spec_z['map'],
+                 true_values=data_no_spec_z['z_phot_lit'],
+                 figure_directory=run_dir + 'test_dataset')
+
+network.plot_pdf(validation_mixtures_no_spec_z, np.arange(20000, 20020),
+                 map_values=validation_results_no_spec_z['map'],
+                 true_values=data_no_spec_z['z_phot_lit'],
+                 figure_directory=run_dir + 'test_dataset')
+
+network.plot_pdf(validation_mixtures_no_spec_z, np.arange(30000, 30020),
+                 map_values=validation_results_no_spec_z['map'],
+                 true_values=data_no_spec_z['z_phot_lit'],
+                 figure_directory=run_dir + 'test_dataset')
 
 max_z = 100.0
 min_z = 0.0
@@ -175,7 +201,7 @@ random_galaxy_pairs_read_in = galaxy_pairs.read_pairs('./data/random_pairs.csv',
 # Make a plot of Npairs against deltaZ
 z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_map_values],
                                all_galaxy_pairs_read_in, random_galaxy_pairs_read_in,
-                               show_fig=True,
+                               show_fig=False,
                                save_name='./plots/' + run_super_name + '/' + run_name + '/pairs_all.png',
                                plt_title=run_name + '-- z {:.2f} to {:.2f}'.format(min_z, max_z))
 
@@ -183,7 +209,23 @@ z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_ma
 # Initialise twitter
 #twit = twitter.TweetWriter()
 #twit.write(twitter.initial_text('on 3D-HST data with basic settings.'), reply_to=None)
+
 """
+plt.figure()
+plt.hist(data_no_spec_z['z_phot_lit'], bins='auto', color='b')
+plt.title('EAZY redshift distribution')
+plt.xlabel(r'$z_{phot}$')
+plt.ylabel('Frequency')
+plt.show()
+
+plt.figure()
+plt.hist(validation_results_no_spec_z['map'], bins='auto', color='r')
+plt.title('ML redshift distribution')
+plt.xlabel(r'$z_{phot}$')
+plt.ylabel('Frequency')
+plt.show()
+"""
+
 
 """
 plt.figure()

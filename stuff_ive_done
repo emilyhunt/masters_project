@@ -12,6 +12,109 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+11/12/18
+- Using asinh magnitudes helps! No more worrying about stupid fucking negative fluxes. YAY.
+- Got the best NMAD yet with this! And all while still including data. woop.
+- Working out b from median standard deviations seems a lot more robust than using means.
+- Added a new error inferrer that can set missing errors to x-sigma times the median of that column (again - medians help here)
+- It's weird that medians for errors but means for fluxes is the best. Weirdweird.
+- Can now toggle flux and error clipping in the dataset expander (can turn off flux clipping when using log fluxes.)
+- We do absolutely shit on the test dataset vs EAZY. Some galaxy types not being in the training sample is probably the issue.
+
+10/12/18
+- The error largener thing actually works! Trained on uniform dist perturbed data it did a bit shit, but exponential perturbation helped the network learn that bigger signal to noise ratios mean worse data. Well done, network!
+
+~~ Negative fluxes investigation ~~
+After removing anything without zspec:
+- About 1750 of 96681 fluxes are negative.
+- 21 errors are negative. They are an absolute pain in the backside, as they make it very difficult sometimes to work with bits and bobs.
+
+pd.DataFrame([preprocessor.maximum_flux, preprocessor.minimum_flux], index=['max', 'min']).transpose()
+		max		min
+f_b             192.455816    -5.454247
+f_f125w        1922.904468    -0.125443
+f_f140w        2158.551050   -13.645748
+f_f160w        2297.888236     0.000000
+f_f435w         741.686021    -5.499743
+f_f606w        1525.043733   -10.359790
+f_f775w        3097.387219   -17.410079
+f_f814wcand     700.550732   -19.114537
+f_f850lp       4579.926452   -22.758663
+f_f850lpcand   4668.246252   -40.847501
+f_h            4519.814336   -79.872263
+f_i            1183.570720  -113.487723
+f_ia427         120.785593   -25.212292
+f_ia445         150.616354   -88.206533
+f_ia505         375.948210   -18.756212
+f_ia527         432.810959    -3.460642
+f_ia550         503.529825   -23.180425
+f_ia574         519.079493   -28.480003
+f_ia598         583.261365    -8.272130
+f_ia624         627.088048   -13.978805
+f_ia651         688.794049    -8.197568
+f_ia679         743.296135   -17.362523
+f_ia738         851.550280    -9.627482
+f_ia767         937.773423   -37.578173
+f_ia797         950.475167   -65.736083
+f_ia856        1175.615816  -121.805712
+f_irac1        6475.353971  -694.746795
+f_irac2        4285.545098  -543.222472
+f_irac3        5643.858541 -3216.777607
+f_irac4       23540.692575 -1661.184264
+f_j            8823.018199   -40.905936
+f_ks          11550.976187   -68.320645
+f_r             668.007362    -9.182675
+f_rc            674.859432   -19.406909
+f_tenisj       1850.500824   -30.987356
+f_tenisk       2374.365191    -7.334986
+f_u              88.152431    -9.407879
+f_u38            49.994829   -28.131357
+f_v             434.515190    -9.416636
+
+pd.DataFrame([preprocessor.maximum_signal_to_noise, preprocessor.minimum_signal_to_noise], index=['max e', 'min e']).transpose()
+
+                    max e       min e
+e_b            1813.072342   -4.585194
+e_f125w       11577.271019   -0.368527
+e_f140w        6021.499607   -3.153202
+e_f160w        3395.355371    0.000000
+e_f435w        1766.453150   -3.747137
+e_f606w        4845.928824   -2.558229
+e_f775w        4963.754806   -2.503090
+e_f814wcand    5282.094422  -10.894921
+e_f850lp       5350.627595   -2.677730
+e_f850lpcand   1835.628232  -33.325042
+e_h             786.775840  -10.821966
+e_i            1680.158310   -5.208479
+e_ia427         394.792539   -8.153162
+e_ia445         658.069671   -5.815636
+e_ia505        1348.117611  -13.919531
+e_ia527        2565.094494   -4.572490
+e_ia550        2542.027166   -4.591347
+e_ia574        1640.647350   -4.712590
+e_ia598        3845.189174   -5.828010
+e_ia624        3576.493407   -4.439121
+e_ia651        5341.103504   -4.477615
+e_ia679        4697.300507   -4.536154
+e_ia738        3889.245398   -4.614795
+e_ia767        1987.856778   -4.684291
+e_ia797        1721.837871   -4.487017
+e_ia856        1705.155162  -10.760169
+e_irac1        1611.137636 -152.873279
+e_irac2        1131.789542  -82.343698
+e_irac3         264.523334  -13.081258
+e_irac4         249.965349  -48.047740
+e_j             912.519472   -5.232934
+e_ks            775.988918   -5.634080
+e_r           12667.488945  -19.659572
+e_rc           4586.886466   -4.054433
+e_tenisj       2756.580596   -4.071561
+e_tenisk       2130.908854   -3.462072
+e_u            1693.871190   -5.172567
+e_u38           186.074748   -7.142380
+e_v            3153.665527   -4.341287
+
+
 06/12/18
 - THE PERTURBATION COEFFICIENT IS THE HERO I NEEDED
 - MDNs are designed inherently to predict *generative* data models. Therefore, the training data must itself be generative.
