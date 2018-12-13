@@ -65,10 +65,10 @@ data_training = preprocessor.enlarge_dataset_within_error(data_training, reduced
 
 # Convert everything that matters to log fluxes
 data_training = preprocessor.convert_to_log_sn_errors(data_training, reduced_flux_keys, reduced_error_keys)
-data_training = preprocessor.convert_to_asinh_magnitudes(data_training, reduced_flux_keys)
+data_training = preprocessor.convert_to_zeroed_magnitudes(data_training, reduced_flux_keys)
 
 data_no_spec_z = preprocessor.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
-data_no_spec_z = preprocessor.convert_to_asinh_magnitudes(data_no_spec_z, reduced_flux_keys)
+data_no_spec_z = preprocessor.convert_to_zeroed_magnitudes(data_no_spec_z, reduced_flux_keys)
 
 
 # Grab keys in order and make final training/validation arrays
@@ -78,7 +78,7 @@ y_train = data_training['z_spec'].values.reshape(-1, 1)
 
 # Make a network
 run_super_name = '18-12-11_edsd_training_selection'
-run_name = '5_colour_time'
+run_name = '6_zeroed_magnitudes'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -112,7 +112,7 @@ network.set_training_data(x_train, y_train)
 exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.7, max_epochs_without_report=100)
 
 # Validate the network at different signal to noise mutliplier levels
-sn_multipliers = [0.0, 1.0, 2.0, 3.0, 4.0]
+sn_multipliers = [4., 3., 2., 1., 0.]
 
 for a_sn in sn_multipliers:
     data_validation_temp = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
@@ -123,7 +123,7 @@ for a_sn in sn_multipliers:
     a_sn = '_sn=' + str(a_sn)
 
     data_validation_temp = preprocessor.convert_to_log_sn_errors(data_validation_temp, reduced_flux_keys, reduced_error_keys)
-    data_validation_temp = preprocessor.convert_to_asinh_magnitudes(data_validation_temp, reduced_flux_keys)
+    data_validation_temp = preprocessor.convert_to_zeroed_magnitudes(data_validation_temp, reduced_flux_keys)
 
     x_validate = data_validation_temp[keys_in_order].values
     y_validate = data_validation_temp['z_spec'].values.reshape(-1, 1)
@@ -234,10 +234,12 @@ z_plot.population_histogram(validation_results_no_spec_z['map'], bins='auto', co
 
 import matplotlib.pyplot as plt
 
+
+# Colour plot
 y = data_no_spec_z['rf_u'] - data_no_spec_z['rf_v']
 x = data_no_spec_z['rf_v'] - data_no_spec_z['rf_j']
 
-val = 1.1
+val = 0.8
 test = (np.abs(validation_results_no_spec_z['map'] - data_no_spec_z['z_phot_lit'])
         / (1 + 0.5*(validation_results_no_spec_z['map'] + data_no_spec_z['z_phot_lit'])))
 good = np.where(test < val)[0]
@@ -252,6 +254,53 @@ ax.set_ylabel('U-V')
 ax.set_xlabel('V-J')
 ax.set_title('Location of outliers using EAZY rest frame colours')
 ax.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
+fig.show()
+
+
+# H band magnitude plot
+y = data_no_spec_z['rf_u'] - data_no_spec_z['rf_v']
+x = data_no_spec_z['rf_v'] - data_no_spec_z['rf_j']
+
+val = 0.8
+test = (np.abs(validation_results_no_spec_z['map'] - data_no_spec_z['z_phot_lit'])
+        / (1 + 0.5*(validation_results_no_spec_z['map'] + data_no_spec_z['z_phot_lit'])))
+good = np.where(test < val)[0]
+bad = np.where(test > val)[0]
+
+f = data_no_spec_z['f_f160w']
+
+fig = plt.figure()
+ax = fig.add_subplot(1, 1, 1)
+ax.plot(f[:], test[:], 'k.', ms=1, alpha=0.05)
+#ax.plot(np.array([]), np.array([]), 'k.', ms=1, alpha=0.3, label=r'$\Delta z / (1 + z_{mean}) < $' + str(val))
+#ax.plot(f[bad], test[bad], 'rs', ms=1, alpha=0.3, label=r'$\Delta z / (1 + z_{mean}) > $' + str(val))
+ax.set_ylabel('$\Delta z / (1 + z_{mean})$')
+ax.set_xlabel('H-band magnitude')
+ax.set_title('Location of outliers using EAZY rest frame colours')
+ax.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
+fig.show()
+
+
+# Band and outlier plot
+fig = plt.figure()
+ax = fig.add_subplot(2, 1, 1)
+ax.hist(data_no_spec_z['f_f160w'], bins='auto', color='r', alpha=0.5, label='Test data')
+ax.set_ylabel('Frequency - test')
+#ax.set_xlabel('H band magnitude')
+ax.set_title('Dataset H band magnitude distribution')
+ax.hist(data_training['f_f160w'], bins='auto', color='b', alpha=0.5, label='Training data')
+ax.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
+#ax.set_xlim(-30, 0)
+
+test = (np.abs(validation_results_no_spec_z['map'] - data_no_spec_z['z_phot_lit'])
+        / (1 + 0.5*(validation_results_no_spec_z['map'] + data_no_spec_z['z_phot_lit'])))
+ax2 = fig.add_subplot(2, 1, 2, sharex=ax)
+ax2.plot(data_no_spec_z['f_f160w'], test, 'k.', ms=1, alpha=0.05)
+ax2.set_ylabel(r'$\Delta z / (1 + z_{mean})$')
+ax2.set_xlabel('H band magnitude')
+#ax2.set_yscale('log')
+#ax2.set_xlim(-30, 0)
+
 fig.show()
 
 """

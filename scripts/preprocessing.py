@@ -714,3 +714,25 @@ class PhotometryScaler:
             data[a_flux_key] = -1. * pogson_ratio * (np.arcsinh(data[a_flux_key] / (2*b)) + np.log(b))
 
         return data
+
+    def convert_to_zeroed_magnitudes(self, data, flux_keys, zero_band='f_f160w', convert_to_asinh_first=True):
+        """Converts fluxes to all have the same value in a particular flux band. May help to prevent overfitting.
+
+        Args:
+            data (pd.DataFrame): dataframe to act on.
+            flux_keys (list of str): list of flux keys, in order.
+
+        Returns:
+            The edited data frame :)
+        """
+        if convert_to_asinh_first:
+            # First off, convert them to asinh magnitudes
+            data = self.convert_to_asinh_magnitudes(data, flux_keys)
+
+        # Now, let's grab how much we need to change zero_band fluxes/magnitudes by to make them all zero
+        conversion_amount = -1 * data[zero_band].values
+
+        # And lastly, apply this to every flux band
+        data[flux_keys] = data[flux_keys].values + conversion_amount.reshape(-1, 1)
+
+        return data

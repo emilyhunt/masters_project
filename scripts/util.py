@@ -20,11 +20,14 @@ def where_valid_redshifts(redshift_1, redshift_2=None, validity_condition: str='
     """
     # Work out where there are valid spec and phot values
     # > 0 is valid for the CANDELS catalogue, as anything set to -99 is invalid.
-    if validity_condition is 'greater_than_zero':
+    if validity_condition == 'greater_than_zero':
         if redshift_2 is not None:
             valid = np.where(np.logical_and(np.asarray(redshift_1) > 0, np.asarray(redshift_2) > 0))[0]
         else:
             valid = np.where(np.asarray(redshift_1) > 0)[0]
+
+    elif validity_condition is None:
+        return np.arange(0, redshift_1.shape[0])
 
     # Otherwise... the specified validity condition isn't implemented!
     else:
