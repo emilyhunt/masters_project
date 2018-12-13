@@ -22,9 +22,14 @@ data = scripts.file_handling.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_
                                        new_column_names=None, get_flux_and_error_keys=False)
 
 archival_redshifts = scripts.file_handling.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
+archival_colours = scripts.file_handling.read_save('./data/KMOS415_output/GS415.rf.save')
 
 data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68', 'z_grism', 'z_grism_l68', 'z_grism_u68']] = \
-    archival_redshifts[['gs4_zspec', 'gs4_zphot', 'gs4_zphot_l68', 'gs4_zphot_u68']]
+    archival_redshifts[['gs4_zspec', 'gs4_zphot', 'gs4_zphot_l68', 'gs4_zphot_u68', 'gs4_zgrism', 'gs4_zgrism_l68',
+                        'gs4_zgrism_u68']]
+
+data[['rf_u', 'rf_b', 'rf_v', 'rf_r', 'rf_j']] = \
+    archival_colours[['gs4_rfu', 'gs4_rfb', 'gs4_rfv', 'gs4_rfr', 'gs4_rfj']]
 
 # Get some useful things from the config file
 flux_keys = hst_goodss_config.flux_keys_in_order
@@ -34,7 +39,7 @@ band_central_wavelengths = hst_goodss_config.band_central_wavelengths.copy()
 # Take a look at the coverage in different photometric bands
 data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
     scripts.preprocessing.missing_data_handler(data, flux_keys, error_keys, band_central_wavelengths,
-                                               coverage_minimum=0.5,
+                                               coverage_minimum=0.99,
                                                valid_photometry_column='use_phot',
                                                missing_flux_handling='normalised_column_mean_ratio',
                                                missing_error_handling='5_sigma_column')
@@ -50,6 +55,7 @@ data_training, data_validation = preprocessor.train_validation_split(data_with_s
 data_training = preprocessor.enlarge_dataset_within_error(data_training, reduced_flux_keys, reduced_error_keys,
                                                           min_sn=0.0, max_sn=2.0, error_model='exponential',
                                                           error_correlation='row-wise', outlier_model=None,
+                                                          dataset_scaling_method='edsd', edsd_mean_redshift=1.2,
                                                           new_dataset_size_factor=5., clip_fluxes=False)
 
 #data_validation = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
@@ -71,8 +77,8 @@ x_train = data_training[keys_in_order].values
 y_train = data_training['z_spec'].values.reshape(-1, 1)
 
 # Make a network
-run_super_name = '18-12-10_error_perturbation'
-run_name = '18_exponential_ecorr=row-wise_pc=0.0370'
+run_super_name = '18-12-11_edsd_training_selection'
+run_name = '5_colour_time'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -84,7 +90,7 @@ except FileExistsError:
 #loss_function = loss_funcs.NormalCDFLoss(cdf_strength=0.00, std_deviation_strength=0.0, normalisation_strength=1.0,
 #                                         grid_size=100, mixtures=5)
 
-loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient=0.0370)
+loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient=0.0385)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
@@ -148,6 +154,11 @@ for a_sn in sn_multipliers:
                                                                  save_name=run_dir + 'wittman_errors' + a_sn + '.png',
                                                                  plt_title=run_name + a_sn)
 
+    z_plot.population_histogram(validation_results['map'], bins='auto', color='m',
+                                plt_title='Validation data ML redshift distribution',
+                                show_fig=False,
+                                save_name=run_dir + 'population_histogram_ML_valid' + a_sn + '.png')
+
 
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
@@ -210,22 +221,38 @@ z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_ma
 #twit = twitter.TweetWriter()
 #twit.write(twitter.initial_text('on 3D-HST data with basic settings.'), reply_to=None)
 
-"""
-plt.figure()
-plt.hist(data_no_spec_z['z_phot_lit'], bins='auto', color='b')
-plt.title('EAZY redshift distribution')
-plt.xlabel(r'$z_{phot}$')
-plt.ylabel('Frequency')
-plt.show()
+z_plot.population_histogram(data_no_spec_z['z_phot_lit'], bins='auto', color='b',
+                            plt_title='Test data EAZY redshift distribution',
+                            show_fig=False,
+                            save_name=run_dir + 'population_histogram_EAZY_test')
 
-plt.figure()
-plt.hist(validation_results_no_spec_z['map'], bins='auto', color='r')
-plt.title('ML redshift distribution')
-plt.xlabel(r'$z_{phot}$')
-plt.ylabel('Frequency')
-plt.show()
-"""
+z_plot.population_histogram(validation_results_no_spec_z['map'], bins='auto', color='r',
+                            plt_title='Test data ML redshift distribution',
+                            show_fig=False,
+                            save_name=run_dir + 'population_histogram_ML_test')
 
+
+import matplotlib.pyplot as plt
+
+y = data_no_spec_z['rf_u'] - data_no_spec_z['rf_v']
+x = data_no_spec_z['rf_v'] - data_no_spec_z['rf_j']
+
+val = 1.1
+test = (np.abs(validation_results_no_spec_z['map'] - data_no_spec_z['z_phot_lit'])
+        / (1 + 0.5*(validation_results_no_spec_z['map'] + data_no_spec_z['z_phot_lit'])))
+good = np.where(test < val)[0]
+bad = np.where(test > val)[0]
+
+fig = plt.figure()
+ax = fig.add_subplot(1, 1, 1)
+ax.plot(x[good], y[good], 'k.', ms=1, alpha=0.05)
+ax.plot(np.array([]), np.array([]), 'k.', ms=1, alpha=0.3, label=r'$\Delta z / (1 + z_{mean}) < $' + str(val))
+ax.plot(x[bad], y[bad], 'rs', ms=1, alpha=0.3, label=r'$\Delta z / (1 + z_{mean}) > $' + str(val))
+ax.set_ylabel('U-V')
+ax.set_xlabel('V-J')
+ax.set_title('Location of outliers using EAZY rest frame colours')
+ax.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
+fig.show()
 
 """
 plt.figure()

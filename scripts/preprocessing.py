@@ -9,6 +9,9 @@ from typing import Optional, Union
 def missing_data_handler(data, flux_keys: list, error_keys: list,
                          band_central_wavelengths: list, coverage_minimum: float=0.95,
                          valid_photometry_column: str='use_phot', z_spec_column: str='z_spec',
+                         z_grism_column: str='z_grism',
+                         z_grism_error_columns: Union[tuple, list]=('z_grism_l68', 'z_grism_u68'),
+                         z_grism_minimum_snr: Optional[float]=None,
                          missing_flux_handling: Optional[str]=None,
                          missing_error_handling: Optional[str]=None):
     """Looks at which bands have enough coverage to be worth using, and suggests rows and columns to drop to achieve
@@ -22,6 +25,10 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
         coverage_minimum (float): required amount of coverage in a column to keep it.
         valid_photometry_column (str): name of a column that specifies rows that aren't for some reason screwed up.
         z_spec_column (str): name of the column of spectroscopic redshifts.
+        z_grism_column (str): name of the column of grism redshifts.
+        z_grism_minimum_snr (None or float): minimum signal to noise ratio to use when selecting which grism redshifts
+            to use.
+        z_grism_error_columns (tuple or list): names of the lower and upper bound z_grism errors.
         missing_flux_handling (None or str): method to use to replace missing flux points.
         missing_error_handling (None or str): method to use to replace missing error points.
 
@@ -317,11 +324,24 @@ def missing_data_handler(data, flux_keys: list, error_keys: list,
     else:
         raise ValueError('specified missing_error_handling not found/implemented/supported.')
 
-    # Step 4: Split the data into sets with and without spectroscopic redshifts
+    # Step 4: Split the data into sets with and without spectroscopic redshifts, and also include grism redshifts if
+    # requested
     has_spec_z = np.where(np.asarray(data[z_spec_column]) != -99.0)[0]
+
+    # If requested, find the
+    if z_grism_minimum_snr is not None:
+        # todo: add zgrism for training support
+        raise NotImplementedError('z_grism support hasn\'t been written yet!')
+        z_grism = np.asarray(data[z_grism_column])
+        z_grism_u = 0
+        z_grism_snr = z_grism
+        has_grism_z = np.where(np.logical_and(z_grism != -1.0, True))
+
     data_spec_z = data.iloc[has_spec_z].copy().reset_index(drop=True)
     data_no_spec_z = data.drop(index=has_spec_z).copy().reset_index(drop=True)
     print('{} out of {} galaxies have spectroscopic redshifts.'.format(has_spec_z.size, data.shape[0]))
+
+    # Step 5: if requested, also augment the dataset with grism redshifts
 
     return [data_spec_z, data_no_spec_z, flux_keys, error_keys]
 
@@ -440,11 +460,15 @@ class PhotometryScaler:
                                      error_correlation: Optional[str] = 'row-wise',
                                      outlier_model: Optional[str] = None,
                                      new_dataset_size_factor: Optional[float] = 10.,
+                                     dataset_scaling_method: Optional[str]='random',
+                                     edsd_mean_redshift: float=1.5,
                                      clip_fluxes: bool=True,
                                      clip_errors: bool=True,
                                      seed: Optional[int] = 42):
         """Function to create new data perturbed from original data. Can be very useful for artificially adding higher
         S/N data to the training data set.
+
+        Dataset scaling methods - 'random', 'EDSD' or None
 
         Implemented error models - 'exponential', 'uniform'
 
@@ -463,6 +487,8 @@ class PhotometryScaler:
                 gets multiplied by deviates of the same standard deviation.)
             outlier_model (None or str): type of model to use to introduce outliers. Default is none. #todo implement?
             new_dataset_size_factor (float): factor to increase size of dataset by. Default is 10.
+            dataset_scaling_method (str): what to use to upscale the dataset. Default is random.
+            edsd_mean_redshift (float): mean redshift to be used by the edsd dataset upscaler.
             clip_fluxes (bool): whether or not to ensure no fluxes are less than band minimums. Necessary for log
                 methods. Default is True.
             clip_errors (bool): whether or not to ensure no fluxes are less than band minimums. Necessary for log
@@ -481,13 +507,50 @@ class PhotometryScaler:
         n_rows = data.shape[0]
         n_columns = len(error_keys)
 
-        # Decide which rows to pick from by pulling out a list of random rows to use
-        if new_dataset_size_factor is not None:
-            new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
-            rows_to_use = np.random.randint(0, n_rows, new_dataset_size)
-        else:
+        # DATASET SCALING
+        # Firstly, we do none if either no method or no new size has been specified
+        if (dataset_scaling_method is None) or (new_dataset_size_factor is None):
             new_dataset_size = n_rows
             rows_to_use = np.arange(0, n_rows)
+
+        # Decide which rows to pick from by pulling out a list of random rows to use
+        elif dataset_scaling_method == 'random':
+            new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
+            rows_to_use = np.random.randint(0, n_rows, new_dataset_size)
+
+        # Decide which rows to pick from by Monte-Carloing to pick rows to use based on a z^2 * e^(-z / L) curve
+        elif dataset_scaling_method == 'edsd' or dataset_scaling_method == 'EDSD':
+            new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
+
+            # Define the curve, where z is the redshift and l is the mode of the distribution
+            def r2_exp(z, l):
+                return z**2 * np.exp(-z / (0.5 * l))
+
+            # Grab the max of the distribution
+            shift = 0.5
+            edsd_mean_redshift += shift
+            edsd_max = r2_exp(edsd_mean_redshift, edsd_mean_redshift)
+            z_max = np.max(data['z_spec'])
+            z_min = np.min(data['z_spec'])
+            z_range = z_max - z_min
+
+            # Loop, pulling out random variates from the r2_exp distribution
+            random_deviate_redshifts = np.zeros(new_dataset_size, dtype=np.float)
+            i = 0
+            while i < new_dataset_size:
+                redshift_to_try = z_range * np.random.rand() + z_min
+                probability = edsd_max * np.random.rand()
+
+                if probability < r2_exp(redshift_to_try + shift, edsd_mean_redshift):
+                    random_deviate_redshifts[i] = redshift_to_try
+                    i += 1
+
+            # Find the argument of the nearest true redshift to inferred ones
+            z_spec_transposed = data['z_spec'].values.reshape(-1, 1)
+            rows_to_use = np.argmin(np.abs(z_spec_transposed - random_deviate_redshifts), axis=0)
+
+        else:
+            raise NotImplementedError('selected dataset_scaling_method not found.')
 
         # Next, let's make a new dataframe to perturb from the original one
         expanded_data = data.loc[rows_to_use].copy()

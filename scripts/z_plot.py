@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import scripts.file_handling
 import scripts.galaxy_pairs
 from scripts import util
-from typing import Optional
+from typing import Optional, Union
 from scipy.stats import norm as scipy_normal
 
 # Make TeX labels work on plots
@@ -68,6 +68,8 @@ def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins
         ax_spec_phot.text(0.05, 0.95, 'NMAD = {:.4f}'.format(overall_nmad),
                      ha='left', va='center', transform=ax_spec_phot.transAxes, fontsize=8,
                      bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
+    else:
+        overall_nmad = None
 
     # RIGHT PLOT 1 - NMAD vs redshift
     # Begin by sorting the redshifts into spectroscopic order
@@ -185,6 +187,8 @@ def mean_redshifts_on_sky(ra, dec, my_redshifts, n_levels: int=50, grid_resoluti
     Returns:
         a plot!
     """
+    # todo: needs updating and/or testing
+
     # Setup ranges
     ra_res = dec_res = grid_resolution
     ra_range = np.linspace(ra.min(), ra.max(), ra_res)
@@ -216,6 +220,55 @@ def mean_redshifts_on_sky(ra, dec, my_redshifts, n_levels: int=50, grid_resoluti
     plt.ylabel('Declination')
     plt.colorbar()
     plt.show()
+
+
+def population_histogram(my_redshifts, x_label: str=r'$z_{phot}$', color: Optional[Union[str, float, tuple, list]]='r',
+                         bins: Union[str, int]='auto',
+                         plt_title: Optional[str]=None, save_name: Optional[str]=None, show_fig: bool=False,
+                         validity_condition: str = 'greater_than_zero'):
+    """Creates a histogram of the population of redshifts. Pretty basic stuff but hey, plotting functions are cool and
+    I don't need your criticism here.
+
+    Args:
+        Function-specific:
+            my_redshifts (array-like): redshifts to plot.
+            color (array-like): the color of the histogram we're plotting.
+            x_label (str): the x axis label to use. Default is z_phot.
+            bins (int or str): the number of bins to use. Default is auto, which uses builtin optimum bin number methods
+                in matplotlib/numpy.
+
+        Module-common:
+            plt_title (None or bool): title for the plot.
+            save_name (None or str): name of plot to save.
+            show_fig (bool): whether or not to show the plot.
+            validity_condition (str): validity condition to pass to util.where_valid_redshifts().
+
+    Returns:
+        the best plot ever
+    """
+    # Find valid redshifts and cast the arrays as only being said valid redshifts
+    valid = util.where_valid_redshifts(my_redshifts, validity_condition=validity_condition)
+    my_redshifts = np.asarray(my_redshifts)[valid]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    ax.hist(my_redshifts, bins=bins, color=color)
+    ax.set_ylabel('Frequency')
+
+    # Output time
+    if x_label is not None:
+        ax.set_xlabel(x_label)
+
+    if plt_title is not None:
+        ax.set_title(plt_title)
+
+    if save_name is not None:
+        fig.savefig(save_name)
+
+    if show_fig:
+        fig.show()
+    else:
+        plt.close(fig)
 
 
 def pair_redshift_deviation(my_redshifts, my_all_galaxy_pairs, my_random_galaxy_pairs,
@@ -563,7 +616,6 @@ if __name__ == '__main__':
     #                                                                                max_separation=15., min_separation=1.5,
     #                                                                                max_move=26, min_move=25,
     #                                                                                size_of_random_catalogue=random_catalogue_repeats)
-
     # Try reading in the pairs again to check the storing worked
     max_z = 100.0
     min_z = 0.0
