@@ -23,6 +23,8 @@ data = scripts.file_handling.read_fits('./data/goodss_3dhst.v4.1.cat.FITS', hst_
 
 archival_redshifts = scripts.file_handling.read_save('./data/KMOS415_output/GS415.3dhst.redshift.save')
 archival_colours = scripts.file_handling.read_save('./data/KMOS415_output/GS415.rf.save')
+archival_sfr = scripts.file_handling.read_save('./data/KMOS415_output/GS415.SFR.save')
+archival_lmass = scripts.file_handling.read_save('./data/KMOS415_output/GS415.zbest.all.ltaugt8.5.bc03.ch.save')
 
 data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68', 'z_grism', 'z_grism_l68', 'z_grism_u68']] = \
     archival_redshifts[['gs4_zspec', 'gs4_zphot', 'gs4_zphot_l68', 'gs4_zphot_u68', 'gs4_zgrism', 'gs4_zgrism_l68',
@@ -30,6 +32,12 @@ data[['z_spec', 'z_phot_lit', 'z_phot_lit_l68', 'z_phot_lit_u68', 'z_grism', 'z_
 
 data[['rf_u', 'rf_b', 'rf_v', 'rf_r', 'rf_j']] = \
     archival_colours[['gs4_rfu', 'gs4_rfb', 'gs4_rfv', 'gs4_rfr', 'gs4_rfj']]
+
+data[['sfr']] = archival_sfr[['gs4_sfrbest']]
+
+data[['sed_log_sfr', 'sed_log_mass', 'sed_metal', 'sed_log_age']] = \
+    archival_lmass[['gs4_sed_lsfr', 'gs4_sed_lmass', 'gs4_sed_metal', 'gs4_sed_lage']]
+
 
 # Get some useful things from the config file
 flux_keys = hst_goodss_config.flux_keys_in_order
@@ -44,6 +52,9 @@ data_with_spec_z, data_no_spec_z, reduced_flux_keys, reduced_error_keys = \
                                                missing_flux_handling='normalised_column_mean_ratio',
                                                missing_error_handling='5_sigma_column')
 
+# RANDOM RESCALING
+#data_with_spec_z[reduced_flux_keys + reduced_error_keys] =
+
 # Initialise a PhotometryScaler to use to log scale etc everything in the same way
 preprocessor = preprocessing.PhotometryScaler([data_with_spec_z, data_no_spec_z],
                                               reduced_flux_keys, reduced_error_keys)
@@ -55,7 +66,7 @@ data_training, data_validation = preprocessor.train_validation_split(data_with_s
 data_training = preprocessor.enlarge_dataset_within_error(data_training, reduced_flux_keys, reduced_error_keys,
                                                           min_sn=0.0, max_sn=2.0, error_model='exponential',
                                                           error_correlation='row-wise', outlier_model=None,
-                                                          dataset_scaling_method='edsd', edsd_mean_redshift=1.2,
+                                                          dataset_scaling_method='random', edsd_mean_redshift=1.2,
                                                           new_dataset_size_factor=5., clip_fluxes=False)
 
 #data_validation = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
@@ -78,7 +89,7 @@ y_train = data_training['z_spec'].values.reshape(-1, 1)
 
 # Make a network
 run_super_name = '18-12-11_edsd_training_selection'
-run_name = '6_zeroed_magnitudes'
+run_name = '14_maxsn=2_scaling=random'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -112,7 +123,7 @@ network.set_training_data(x_train, y_train)
 exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.7, max_epochs_without_report=100)
 
 # Validate the network at different signal to noise mutliplier levels
-sn_multipliers = [4., 3., 2., 1., 0.]
+sn_multipliers = [4., 3., 2., 1., 20., 0.]
 
 for a_sn in sn_multipliers:
     data_validation_temp = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
@@ -170,6 +181,12 @@ overall_nmad = z_plot.phot_vs_spec(data_no_spec_z['z_phot_lit'], validation_resu
                                    show_fig=False,
                                    limits=[0, 7],
                                    save_name=run_dir + 'phot_vs_EAZY.png',
+                                   plt_title=run_name, point_alpha=0.02, point_color='b')
+
+overall_nmad = z_plot.phot_vs_spec(data_no_spec_z['z_grism'], validation_results_no_spec_z['map'], show_nmad=True,
+                                   show_fig=False,
+                                   limits=[0, 7],
+                                   save_name=run_dir + 'phot_vs_grism.png',
                                    plt_title=run_name, point_alpha=0.02, point_color='b')
 
 valid_map_values = util.where_valid_redshifts(validation_results_no_spec_z['map'])
@@ -234,7 +251,6 @@ z_plot.population_histogram(validation_results_no_spec_z['map'], bins='auto', co
 
 import matplotlib.pyplot as plt
 
-
 # Colour plot
 y = data_no_spec_z['rf_u'] - data_no_spec_z['rf_v']
 x = data_no_spec_z['rf_v'] - data_no_spec_z['rf_j']
@@ -249,7 +265,7 @@ fig = plt.figure()
 ax = fig.add_subplot(1, 1, 1)
 ax.plot(x[good], y[good], 'k.', ms=1, alpha=0.05)
 ax.plot(np.array([]), np.array([]), 'k.', ms=1, alpha=0.3, label=r'$\Delta z / (1 + z_{mean}) < $' + str(val))
-ax.plot(x[bad], y[bad], 'rs', ms=1, alpha=0.3, label=r'$\Delta z / (1 + z_{mean}) > $' + str(val))
+ax.plot(x[bad], y[bad], 'rs', ms=1, alpha=0.05, label=r'$\Delta z / (1 + z_{mean}) > $' + str(val))
 ax.set_ylabel('U-V')
 ax.set_xlabel('V-J')
 ax.set_title('Location of outliers using EAZY rest frame colours')
@@ -284,24 +300,40 @@ fig.show()
 # Band and outlier plot
 fig = plt.figure()
 ax = fig.add_subplot(2, 1, 1)
-ax.hist(data_no_spec_z['f_f160w'], bins='auto', color='r', alpha=0.5, label='Test data')
+ax.hist(data_no_spec_z['rf_j'], bins='auto', color='r', alpha=0.5, label='Test data')
 ax.set_ylabel('Frequency - test')
 #ax.set_xlabel('H band magnitude')
 ax.set_title('Dataset H band magnitude distribution')
-ax.hist(data_training['f_f160w'], bins='auto', color='b', alpha=0.5, label='Training data')
+ax.hist(data_training['rf_j'], bins='auto', color='b', alpha=0.5, label='Training data')
 ax.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
 #ax.set_xlim(-30, 0)
 
 test = (np.abs(validation_results_no_spec_z['map'] - data_no_spec_z['z_phot_lit'])
         / (1 + 0.5*(validation_results_no_spec_z['map'] + data_no_spec_z['z_phot_lit'])))
 ax2 = fig.add_subplot(2, 1, 2, sharex=ax)
-ax2.plot(data_no_spec_z['f_f160w'], test, 'k.', ms=1, alpha=0.05)
+ax2.plot(data_no_spec_z['rf_j'], test, 'k.', ms=1, alpha=0.05)
 ax2.set_ylabel(r'$\Delta z / (1 + z_{mean})$')
 ax2.set_xlabel('H band magnitude')
 #ax2.set_yscale('log')
 #ax2.set_xlim(-30, 0)
 
 fig.show()
+
+test = (np.abs(validation_results_no_spec_z['map'] - data_no_spec_z['z_phot_lit'])
+        / (1 + 0.5*(validation_results_no_spec_z['map'] + data_no_spec_z['z_phot_lit'])))
+z_plot.density_plot(data_no_spec_z['sed_log_mass'], data_no_spec_z['sed_log_sfr'], test, show_fig=True, x_lim=(0, 12), y_lim=(-13, 4),
+                    x_label=r'$log(M_{stars})$', y_label=r'$log(SFR)$', grid_resolution=15, n_levels=20,
+                    plt_title='SFR vs log stellar mass: test dataset',
+                    save_name=run_dir + 'sfr_vs_mstars_test.png')
+
+test = (np.abs(validation_results['map'] - data_validation['z_spec'])
+        / (1 + 0.5*(validation_results['map'] + data_validation['z_spec'])))
+z_plot.density_plot(data_validation['sed_log_mass'], data_validation['sed_log_sfr'], test, show_fig=True, x_lim=(0, 12), y_lim=(-13, 4),
+                    x_label=r'$log(M_{stars})$', y_label=r'$log(SFR)$', grid_resolution=15, n_levels=20,
+                    plt_title='SFR vs log stellar mass: validation dataset', point_alpha=0.2,
+                    save_name=run_dir + 'sfr_vs_mstars_valid.png')
+
+
 
 """
 plt.figure()

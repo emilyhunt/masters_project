@@ -2,6 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import scripts.file_handling
 import scripts.galaxy_pairs
@@ -174,52 +175,120 @@ def sky_locations(ra, dec):
     plt.show()
 
 
-def mean_redshifts_on_sky(ra, dec, my_redshifts, n_levels: int=50, grid_resolution: int=30):
-    """Makes a sky plot of the mean redshift in each grid bin.
+def density_plot(x, y, z, n_levels: int=50, grid_resolution: int=30, x_lim: Optional[Union[tuple, list]]=None,
+                 y_lim: Optional[Union[tuple, list]]=None, z_lim: Optional[Union[tuple, list]]=None,
+                 plt_title: Optional[str] = None, save_name: Optional[str] = None, show_fig: bool = False,
+                 x_label: Optional[str]='x', y_label: Optional[str]='y', point_size: float=1., point_alpha: float=0.05):
+    """Makes a surface density plot of some particular desired parameter.
 
     Args:
-        ra (array-like): right ascensions to plot.
-        dec (array-like): declinations to plot.
-        my_redshifts (array-like): corresponding redshifts of objects.
-        n_levels (int): number of levels to plot in the colour chart. Default is 50.
-        grid_resolution (int): number of grid points to take in each direction. Default is 30.
+        Function-specific:
+            x (array-like): x values to plot.
+            y (array-like): y values to plot.
+            z (array-like): corresponding redshifts of objects.
+            n_levels (int): number of levels to plot in the colour chart. Default is 50.
+            grid_resolution (int): number of grid points to take in each direction. Default is 30.
+            x_lim (None, list or tuple): allowed limits of x values.
+            y_lim (None, list or tuple): allowed limits of x values.
+            z_lim (None, list or tuple): allowed limits of x values.
+            x_label (None or str): x label for the plot.
+            y_label (None or str): y label for the plot.
+        
+        Module-common:
+            plt_title (None or bool): title for the plot.
+            save_name (None or str): name of plot to save.
+            show_fig (bool): whether or not to show the plot.
 
     Returns:
         a plot!
     """
     # todo: needs updating and/or testing
 
-    # Setup ranges
-    ra_res = dec_res = grid_resolution
-    ra_range = np.linspace(ra.min(), ra.max(), ra_res)
-    dec_range = np.linspace(dec.min(), dec.max(), dec_res)
-    ra_space = np.abs(ra_range[1] - ra_range[0])
-    dec_space = np.abs(dec_range[1] - dec_range[0])
+    x_resolution = y_resolution = grid_resolution
+
+    # Setup the limits, ignoring anything not within said limits
+    if x_lim is None:
+        allowed_x = np.ones(x.size, dtype=bool)
+    else:
+        allowed_x = np.where(np.logical_and(x_lim[0] < x, x < x_lim[1]), True, False)
+
+    if y_lim is None:
+        allowed_y = np.ones(y.size, dtype=bool)
+    else:
+        allowed_y = np.where(np.logical_and(y_lim[0] < y, y < y_lim[1]), True, False)
+
+    if z_lim is None:
+        allowed_z = np.ones(z.size, dtype=bool)
+    else:
+        allowed_z = np.where(np.logical_and(z_lim[0] < z, z < z_lim[1]), True, False)
+
+    # Now, only keep values that satisfy all conditions
+    allowed_values = np.logical_and(allowed_x, np.logical_and(allowed_y, allowed_z))
+    x = x[allowed_values]
+    y = y[allowed_values]
+    z = z[allowed_values]
+
+    # Calculate some ranges to grid over
+    x_range = np.linspace(x.min(), x.max(), x_resolution)
+    x_spacing = np.abs(x_range[1] - x_range[0])
+    y_range = np.linspace(y.min(), y.max(), y_resolution)
+    y_spacing = np.abs(y_range[1] - y_range[0])
 
     # Make grid points for later
-    ra_grid, dec_grid = np.meshgrid(ra_range, dec_range)
+    x_grid, y_grid = np.meshgrid(x_range, y_range)
 
     # Cycle over the different grid points calculating the mean redshift in each place
-    mean_redshifts = np.zeros(ra_grid.shape)
+    mean_z = np.zeros(x_grid.shape)
     i = 0
-    for a_ra in ra_range:
+    for a_x in x_range:
         j = 0
-        for a_dec in dec_range:
-            good_ra = np.logical_and(ra < a_ra + ra_space, ra > a_ra)
-            good_dec = np.logical_and(dec < a_dec + dec_space, dec > a_dec)
-            good_zs = my_redshifts > 0
-            good_coords = np.logical_and(good_ra, good_dec)
-            good_final = np.logical_and(good_coords, good_zs)
-            mean_redshifts[i, j] = np.mean(my_redshifts[good_final])
+        for a_y in y_range:
+            good_x = np.logical_and(a_x < x, x < a_x + x_spacing)
+            good_y = np.logical_and(a_y < y, y < a_y + y_spacing)
+            good_z = z[np.logical_and(good_x, good_y)]
+
+            # Only calculate the mean if there's more than one in this bin!
+            if good_z.size > 0:
+                mean_z[i, j] = np.mean(good_z)
+            else:
+                mean_z[i, j] = np.nan
             j += 1
         i += 1
 
-    # Output
-    plt.contourf(ra_grid, dec_grid, mean_redshifts.T, n_levels)
-    plt.xlabel('Right ascension')
-    plt.ylabel('Declination')
-    plt.colorbar()
-    plt.show()
+    # Do the contoury bit
+    fig = plt.figure(figsize=(7.48, 4))
+    ax = fig.add_subplot(1, 2, 1)
+    density_plot_object = ax.contourf(x_grid, y_grid, mean_z.T, n_levels, cmap=plt.get_cmap('plasma'))
+
+    # Setup of the colorbar
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    fig.colorbar(density_plot_object, cax=cax, orientation='vertical')
+
+    # Make a separate plot showing the points going into the plot
+    ax2 = fig.add_subplot(1, 2, 2, sharey=ax)
+    ax2.plot(x, y, 'k.', ms=point_size, alpha=point_alpha)
+
+    # Output time
+    if x_label is not None:
+        ax.set_xlabel(x_label)
+        ax2.set_xlabel(x_label)
+    if y_label is not None:
+        ax.set_ylabel(y_label)
+
+    if x_lim is not None:
+        ax.set_xlim(x_lim[0], x_lim[1])
+    if y_lim is not None:
+        ax.set_ylim(y_lim[0], y_lim[1])
+
+    if plt_title is not None:
+        ax.set_title(plt_title)
+    if save_name is not None:
+        fig.savefig(save_name)
+    if show_fig:
+        fig.show()
+    else:
+        plt.close(fig)
 
 
 def population_histogram(my_redshifts, x_label: str=r'$z_{phot}$', color: Optional[Union[str, float, tuple, list]]='r',
