@@ -175,10 +175,11 @@ def sky_locations(ra, dec):
     plt.show()
 
 
-def density_plot(x, y, z, n_levels: int=50, grid_resolution: int=30, x_lim: Optional[Union[tuple, list]]=None,
+def density_plot(x, y, z, n_levels: int=50, grid_resolution: Union[int, list, tuple]=30, x_lim: Optional[Union[tuple, list]]=None,
                  y_lim: Optional[Union[tuple, list]]=None, z_lim: Optional[Union[tuple, list]]=None,
                  plt_title: Optional[str] = None, save_name: Optional[str] = None, show_fig: bool = False,
-                 x_label: Optional[str]='x', y_label: Optional[str]='y', point_size: float=1., point_alpha: float=0.05):
+                 x_label: Optional[str]='x', y_label: Optional[str]='y', point_size: float=1., point_alpha: float=0.05,
+                 points_already_gridded: bool=False):
     """Makes a surface density plot of some particular desired parameter.
 
     Args:
@@ -202,58 +203,63 @@ def density_plot(x, y, z, n_levels: int=50, grid_resolution: int=30, x_lim: Opti
     Returns:
         a plot!
     """
-    # todo: needs updating and/or testing
+    # Only take a grid of everything if data we're passed isn't actually already ready for plotting
+    if points_already_gridded:
+        x_grid = np.asarray(x).reshape(grid_resolution[0], grid_resolution[1])
+        y_grid = np.asarray(y).reshape(grid_resolution[0], grid_resolution[1])
+        mean_z = np.asarray(z).reshape(grid_resolution[1], grid_resolution[0])
 
-    x_resolution = y_resolution = grid_resolution
-
-    # Setup the limits, ignoring anything not within said limits
-    if x_lim is None:
-        allowed_x = np.ones(x.size, dtype=bool)
     else:
-        allowed_x = np.where(np.logical_and(x_lim[0] < x, x < x_lim[1]), True, False)
+        x_resolution = y_resolution = grid_resolution
 
-    if y_lim is None:
-        allowed_y = np.ones(y.size, dtype=bool)
-    else:
-        allowed_y = np.where(np.logical_and(y_lim[0] < y, y < y_lim[1]), True, False)
+        # Setup the limits, ignoring anything not within said limits
+        if x_lim is None:
+            allowed_x = np.ones(x.size, dtype=bool)
+        else:
+            allowed_x = np.where(np.logical_and(x_lim[0] < x, x < x_lim[1]), True, False)
 
-    if z_lim is None:
-        allowed_z = np.ones(z.size, dtype=bool)
-    else:
-        allowed_z = np.where(np.logical_and(z_lim[0] < z, z < z_lim[1]), True, False)
+        if y_lim is None:
+            allowed_y = np.ones(y.size, dtype=bool)
+        else:
+            allowed_y = np.where(np.logical_and(y_lim[0] < y, y < y_lim[1]), True, False)
 
-    # Now, only keep values that satisfy all conditions
-    allowed_values = np.logical_and(allowed_x, np.logical_and(allowed_y, allowed_z))
-    x = x[allowed_values]
-    y = y[allowed_values]
-    z = z[allowed_values]
+        if z_lim is None:
+            allowed_z = np.ones(z.size, dtype=bool)
+        else:
+            allowed_z = np.where(np.logical_and(z_lim[0] < z, z < z_lim[1]), True, False)
 
-    # Calculate some ranges to grid over
-    x_range = np.linspace(x.min(), x.max(), x_resolution)
-    x_spacing = np.abs(x_range[1] - x_range[0])
-    y_range = np.linspace(y.min(), y.max(), y_resolution)
-    y_spacing = np.abs(y_range[1] - y_range[0])
+        # Now, only keep values that satisfy all conditions
+        allowed_values = np.logical_and(allowed_x, np.logical_and(allowed_y, allowed_z))
+        x = x[allowed_values]
+        y = y[allowed_values]
+        z = z[allowed_values]
 
-    # Make grid points for later
-    x_grid, y_grid = np.meshgrid(x_range, y_range)
+        # Calculate some ranges to grid over
+        x_range = np.linspace(x.min(), x.max(), x_resolution)
+        x_spacing = np.abs(x_range[1] - x_range[0])
+        y_range = np.linspace(y.min(), y.max(), y_resolution)
+        y_spacing = np.abs(y_range[1] - y_range[0])
 
-    # Cycle over the different grid points calculating the mean redshift in each place
-    mean_z = np.zeros(x_grid.shape)
-    i = 0
-    for a_x in x_range:
-        j = 0
-        for a_y in y_range:
-            good_x = np.logical_and(a_x < x, x < a_x + x_spacing)
-            good_y = np.logical_and(a_y < y, y < a_y + y_spacing)
-            good_z = z[np.logical_and(good_x, good_y)]
+        # Make grid points for later
+        x_grid, y_grid = np.meshgrid(x_range, y_range)
 
-            # Only calculate the mean if there's more than one in this bin!
-            if good_z.size > 0:
-                mean_z[i, j] = np.mean(good_z)
-            else:
-                mean_z[i, j] = np.nan
-            j += 1
-        i += 1
+        # Cycle over the different grid points calculating the mean redshift in each place
+        mean_z = np.zeros(x_grid.shape)
+        i = 0
+        for a_x in x_range:
+            j = 0
+            for a_y in y_range:
+                good_x = np.logical_and(a_x < x, x < a_x + x_spacing)
+                good_y = np.logical_and(a_y < y, y < a_y + y_spacing)
+                good_z = z[np.logical_and(good_x, good_y)]
+
+                # Only calculate the mean if there's more than one in this bin!
+                if good_z.size > 0:
+                    mean_z[i, j] = np.mean(good_z)
+                else:
+                    mean_z[i, j] = np.nan
+                j += 1
+            i += 1
 
     # Do the contoury bit
     fig = plt.figure(figsize=(7.48, 4))
@@ -564,6 +570,8 @@ def error_evaluator(spectroscopic_z, photometric_z, sigma_1_lower, sigma_1_upper
     else:
         plt.close(fig)
 
+    return [sigma_level_greater_3, sigma_level_greater_5]
+
 
 def error_evaluator_wittman(spectroscopic_z, validation_mixtures, validation_results,
                             plt_title: Optional[str]=None, save_name: Optional[str]=None, show_fig: bool=False,
@@ -625,8 +633,8 @@ def error_evaluator_wittman(spectroscopic_z, validation_mixtures, validation_res
     ax.plot([0, 1], [0, 1], 'k--')
     ax.plot(cdfs_sorted, cdfs_summed, 'r-')
 
-    ax.text(0.02, 0.98, 'Mean residual = {:.5f}'.format(mean_residual)
-            + '\nMax residual = {:.5f}'.format(max_residual),
+    ax.text(0.02, 0.98, r'Mean residual$^2$' + ' = {:.5f}'.format(mean_residual)
+            + '\n' + r'Max residual$^2$' + ' = {:.5f}'.format(max_residual),
             ha='left', va='top', transform=ax.transAxes, fontsize=8,
             bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0), ))
 

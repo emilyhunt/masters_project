@@ -459,7 +459,8 @@ class PhotometryScaler:
                                      error_model: str = 'exponential',
                                      error_correlation: Optional[str] = 'row-wise',
                                      outlier_model: Optional[str] = None,
-                                     new_dataset_size_factor: Optional[float] = 10.,
+                                     new_dataset_size_factor: Optional[float]=10.,
+                                     new_dataset_size: Optional[int]=None,
                                      dataset_scaling_method: Optional[str]='random',
                                      edsd_mean_redshift: float=1.5,
                                      clip_fluxes: bool=True,
@@ -486,7 +487,8 @@ class PhotometryScaler:
             error_correlation (str or None): type of correlation to apply to errors. Default is row-wise (so, each row
                 gets multiplied by deviates of the same standard deviation.)
             outlier_model (None or str): type of model to use to introduce outliers. Default is none. #todo implement?
-            new_dataset_size_factor (float): factor to increase size of dataset by. Default is 10.
+            new_dataset_size_factor (float or None): factor to increase size of dataset by. Default is 10.
+            new_dataset_size (float or None): alternatively, a numerical size for the dataset can be specified.
             dataset_scaling_method (str): what to use to upscale the dataset. Default is random.
             edsd_mean_redshift (float): mean redshift to be used by the edsd dataset upscaler.
             clip_fluxes (bool): whether or not to ensure no fluxes are less than band minimums. Necessary for log
@@ -509,18 +511,25 @@ class PhotometryScaler:
 
         # DATASET SCALING
         # Firstly, we do none if either no method or no new size has been specified
-        if (dataset_scaling_method is None) or (new_dataset_size_factor is None):
+        if (dataset_scaling_method is None) or (new_dataset_size_factor is None and new_dataset_size is None):
             new_dataset_size = n_rows
             rows_to_use = np.arange(0, n_rows)
 
         # Decide which rows to pick from by pulling out a list of random rows to use
         elif dataset_scaling_method == 'random':
-            new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
+
+            # Only assign a new dataset size if a factor has been set
+            if new_dataset_size_factor is not None:
+                new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
+
             rows_to_use = np.random.randint(0, n_rows, new_dataset_size)
 
         # Decide which rows to pick from by Monte-Carloing to pick rows to use based on a z^2 * e^(-z / L) curve
         elif dataset_scaling_method == 'edsd' or dataset_scaling_method == 'EDSD':
-            new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
+
+            # Only assign a new dataset size if a factor has been set
+            if new_dataset_size_factor is not None:
+                new_dataset_size = int(np.round(n_rows * new_dataset_size_factor))
 
             # Define the curve, where z is the redshift and l is the mode of the distribution
             def r2_exp(z, l):

@@ -12,6 +12,15 @@ Stuff I could do:
 
 ---- ---- ---- ---- ----
 
+24/12/18
+- TAC stuff is coming along nicely
+- Running with pc still on was a mistake. Also it doesn't take long to run at all. Re-running with 
+
+23/12/18
+- Tried doing some scipy minimisation of a 4 parameter perturbation law but it's taking hecking forever! It came up with [ 2.06914063e-02  8.49609374e-05 -2.40234375e-04  1.53320312e-04] with nmad=0.024187255520895155, maxres=0.002419339924292079 though
+- Using median instead of not improves test data NMAD ever so slightly (presumably it fixes some of the crazier PDFs)
+- Use a big ass expanded dataset! It makes life betterrrrr
+
 11/12/18
 - Using asinh magnitudes helps! No more worrying about stupid fucking negative fluxes. YAY.
 - Got the best NMAD yet with this! And all while still including data. woop.

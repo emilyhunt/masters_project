@@ -511,8 +511,7 @@ class MixtureDensityNetwork:
         cdf_constant = map_values.copy()
         cdf_multiplier = map_values.copy()
         modality = np.zeros(n_objects, dtype=int)
-        valid_map_values = np.empty(n_objects, dtype=bool)
-        valid_map_values[:] = False
+        valid_map_values = np.zeros(n_objects, dtype=int)
 
         # A bit of setup for our initial guess of MAP values
         guess_x_range = np.linspace(data_range[0], data_range[1], num=start_resolution)
@@ -549,7 +548,7 @@ class MixtureDensityNetwork:
             turning_points = np.count_nonzero(guess_signchange)
 
             # Convert this number of turning points into a measure of modality with some fancyness
-            if turning_points is not 0:
+            if turning_points != 0:
                 modality[i] = int(np.ceil(0.5 + turning_points / 2))
             else:
                 modality[i] = 0
@@ -562,7 +561,7 @@ class MixtureDensityNetwork:
             # Store the result only if we're able to
             if result.success:
                 map_values[i] = result.x
-                valid_map_values[i] = True
+                valid_map_values[i] = 1
                 successes += 1
                 mean_number_of_iterations += result.nit
 
@@ -583,6 +582,11 @@ class MixtureDensityNetwork:
                     limits = pymc3.stats.quantiles(random_deviates, qlist=[15.865, 84.135])  # Again, 1 sigma error.
                     lower_limits[i] = limits[15.865]
                     upper_limits[i] = limits[84.135]
+
+                    # Set the MAP to the median if the MAP we found isn't within the limits
+                    if map_values[i] > upper_limits[i] or map_values[i] < lower_limits[i]:
+                        map_values[i] = np.median(random_deviates)
+                        valid_map_values[i] = 2
 
                 # Calculate constants to let us normalise the CDFs later
                 cdf_stuff = self.loss_function.cdf_multiple_points(data_range, object_dictionary)

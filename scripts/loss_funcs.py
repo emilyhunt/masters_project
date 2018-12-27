@@ -18,7 +18,8 @@ from typing import Union, Optional
 
 class NormalPDFLoss:
 
-    def __init__(self, perturbation_coefficient: float=0.3):
+    def __init__(self, perturbation_coefficient_0: float=0.3, perturbation_coefficient_1: float=0.0,
+                 perturbation_coefficient_2: float=0.0, perturbation_coefficient_3: float=0.0):
         """Creates a normal distribution implemented in tensorflow notation.
         You may wish to access:
             - self.activation_functions: a list of activation functions that should be used with the mixture arguments,
@@ -34,7 +35,10 @@ class NormalPDFLoss:
         self.bias_initializers = [tf.initializers.zeros, tf.initializers.ones, tf.initializers.ones]
 
         # A useful constant to keep around
-        self.perturbation_coefficient = perturbation_coefficient
+        self.perturbation_coefficient_0 = perturbation_coefficient_0
+        self.perturbation_coefficient_1 = perturbation_coefficient_1
+        self.perturbation_coefficient_2 = perturbation_coefficient_2
+        self.perturbation_coefficient_3 = perturbation_coefficient_3
 
     def tensor_evaluate(self, true_values, coefficients):
         """Lossfunc defined in tensorflow notation.
@@ -52,7 +56,19 @@ class NormalPDFLoss:
 
             # Perturb all of the true values with our perturbation law
             random_values = tf.random.normal(tf.shape(true_values), mean=0.0, stddev=1.0)
-            true_values = tf.add(true_values, tf.multiply(random_values, self.perturbation_coefficient))
+            true_values_squared = tf.square(true_values)
+            true_values_cubed = tf.multiply(true_values, true_values_squared)
+
+            perturbation_0 = tf.multiply(random_values, self.perturbation_coefficient_0)
+            perturbation_1 = tf.multiply(tf.multiply(random_values, self.perturbation_coefficient_1),
+                                         true_values)
+            perturbation_2 = tf.multiply(tf.multiply(random_values, self.perturbation_coefficient_2),
+                                         true_values_squared)
+            perturbation_3 = tf.multiply(tf.multiply(random_values, self.perturbation_coefficient_3),
+                                         true_values_cubed)
+
+            true_values = tf.add(tf.add(tf.add(tf.add(perturbation_0, perturbation_1),
+                                               perturbation_2), perturbation_3), true_values)
 
             # Tile the true values so that they have the same shape as the distributions and can be evaluated
             tiled_true_values = tf.tile(true_values, [1, tf.shape(coefficients['means'])[1]])

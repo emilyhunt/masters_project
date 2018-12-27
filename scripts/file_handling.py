@@ -28,7 +28,6 @@ def read_save(target: str, columns_to_keep: Optional[list]=None, new_column_name
     # Ensure the byte order of the read in numpy arrays is the same as on this machine. Solves an issue as described at:
     # https://pandas.pydata.org/pandas-docs/stable/gotchas.html#byte-ordering-issues
     for a_key in data.keys():
-        print(a_key)
         data[a_key] = data[a_key].byteswap().newbyteorder('L')
 
     # Cast data as a DataFrame

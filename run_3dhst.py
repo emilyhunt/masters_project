@@ -67,7 +67,7 @@ data_training = preprocessor.enlarge_dataset_within_error(data_training, reduced
                                                           min_sn=0.0, max_sn=2.0, error_model='exponential',
                                                           error_correlation='row-wise', outlier_model=None,
                                                           dataset_scaling_method='random', edsd_mean_redshift=1.2,
-                                                          new_dataset_size_factor=5., clip_fluxes=False)
+                                                          new_dataset_size_factor=20., clip_fluxes=False)
 
 #data_validation = preprocessor.enlarge_dataset_within_error(data_validation, reduced_flux_keys, reduced_error_keys,
 #                                                          min_sn=0.0, max_sn=1.0, error_model='uniform',
@@ -88,8 +88,8 @@ x_train = data_training[keys_in_order].values
 y_train = data_training['z_spec'].values.reshape(-1, 1)
 
 # Make a network
-run_super_name = '18-12-11_edsd_training_selection'
-run_name = '14_maxsn=2_scaling=random'
+run_super_name = '18-12-27_very_long_runs'
+run_name = '1_pc0=0.019'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -101,7 +101,7 @@ except FileExistsError:
 #loss_function = loss_funcs.NormalCDFLoss(cdf_strength=0.00, std_deviation_strength=0.0, normalisation_strength=1.0,
 #                                         grid_size=100, mixtures=5)
 
-loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient=0.0385)
+loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient_0=0.019)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
@@ -120,7 +120,8 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=3000, max_runtime=0.7, max_epochs_without_report=100)
+exit_code, epochs, training_success = network.train(max_epochs=100000, max_runtime=5.0,
+                                                    max_epochs_without_report=5000, reporting_time=120.)
 
 # Validate the network at different signal to noise mutliplier levels
 sn_multipliers = [4., 3., 2., 1., 20., 0.]
