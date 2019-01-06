@@ -81,7 +81,6 @@ data_training = preprocessor.convert_to_zeroed_magnitudes(data_training, reduced
 data_no_spec_z = preprocessor.convert_to_log_sn_errors(data_no_spec_z, reduced_flux_keys, reduced_error_keys)
 data_no_spec_z = preprocessor.convert_to_zeroed_magnitudes(data_no_spec_z, reduced_flux_keys)
 
-
 # Grab keys in order and make final training/validation arrays
 keys_in_order = [item for sublist in zip(reduced_flux_keys, reduced_error_keys) for item in sublist]  # ty StackExchange
 x_train = data_training[keys_in_order].values
@@ -89,7 +88,7 @@ y_train = data_training['z_spec'].values.reshape(-1, 1)
 
 # Make a network
 run_super_name = '18-12-27_very_long_runs'
-run_name = '1_pc0=0.019'
+run_name = '13_repeat_of_9_for_more_mixtures'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -101,7 +100,7 @@ except FileExistsError:
 #loss_function = loss_funcs.NormalCDFLoss(cdf_strength=0.00, std_deviation_strength=0.0, normalisation_strength=1.0,
 #                                         grid_size=100, mixtures=5)
 
-loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient_0=0.019)
+loss_function = loss_funcs.NormalPDFLoss(perturbation_coefficient_0=0.028)
 
 network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + '/' + run_name,
                                     regularization=None,
@@ -120,7 +119,7 @@ network = mdn.MixtureDensityNetwork(loss_function, './logs/' + run_super_name + 
 network.set_training_data(x_train, y_train)
 
 # Run this thing!
-exit_code, epochs, training_success = network.train(max_epochs=100000, max_runtime=5.0,
+exit_code, epochs, training_success = network.train(max_epochs=40000, max_runtime=5.0,
                                                     max_epochs_without_report=5000, reporting_time=120.)
 
 # Validate the network at different signal to noise mutliplier levels
@@ -153,25 +152,48 @@ for a_sn in sn_multipliers:
     overall_nmad = z_plot.phot_vs_spec(y_validate.flatten(), validation_results['map'], show_nmad=True, show_fig=False,
                                        limits=[0, 7],
                                        save_name=run_dir + 'phot_vs_spec' + a_sn + '.png',
-                                       plt_title=run_name + a_sn)
+                                       plt_title=None)
 
     valid_map_values = util.where_valid_redshifts(validation_results['map'])
     z_plot.error_evaluator(y_validate.flatten(), validation_results['map'],
                            validation_results['lower'], validation_results['upper'], show_fig=False,
                            save_name=run_dir + 'errors' + a_sn + '.png',
-                           plt_title=run_name + a_sn)
+                           plt_title=None)
 
     mean_residual, max_residual = z_plot.error_evaluator_wittman(y_validate.flatten(),
                                                                  validation_mixtures, validation_results, show_fig=False,
                                                                  save_name=run_dir + 'wittman_errors' + a_sn + '.png',
-                                                                 plt_title=run_name + a_sn)
+                                                                 plt_title=None)
 
     z_plot.population_histogram(validation_results['map'], bins='auto', color='m',
                                 plt_title='Validation data ML redshift distribution',
                                 show_fig=False,
                                 save_name=run_dir + 'population_histogram_ML_valid' + a_sn + '.png')
 
+    # Save stuff to csv!
+    to_csv = [data_validation, validation_results]
+    to_name = ['data_validation' + a_sn, 'validation_results' + a_sn]
+    for name, csv_me in zip(to_name, to_csv):
+        csv_me.to_csv('./final_run_data/different_sn/' + name + '.csv')
+        print('Successfully saved {}'.format(name))
 
+    # Pickle some other stuff!
+    import pickle
+
+    to_pickle = [validation_mixtures]
+    to_name = ['validation_mixtures' + a_sn]
+    for name, pickle_me in zip(to_name, to_pickle):
+        with open('./final_run_data/different_sn/' + name + '.pkl', 'wb') as f:
+            pickle.dump(pickle_me, f, pickle.HIGHEST_PROTOCOL)
+        print('Successfully saved {}'.format(name))
+
+    # NB to open again:
+    # with open('name.pkl', 'rb') as f:
+    #     thing = pickle.load(f)
+
+
+
+"""
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
@@ -182,13 +204,13 @@ overall_nmad = z_plot.phot_vs_spec(data_no_spec_z['z_phot_lit'], validation_resu
                                    show_fig=False,
                                    limits=[0, 7],
                                    save_name=run_dir + 'phot_vs_EAZY.png',
-                                   plt_title=run_name, point_alpha=0.02, point_color='b')
+                                   plt_title=None, point_alpha=0.02, point_color='b')
 
 overall_nmad = z_plot.phot_vs_spec(data_no_spec_z['z_grism'], validation_results_no_spec_z['map'], show_nmad=True,
                                    show_fig=False,
                                    limits=[0, 7],
                                    save_name=run_dir + 'phot_vs_grism.png',
-                                   plt_title=run_name, point_alpha=0.02, point_color='b')
+                                   plt_title=None, point_alpha=0.02, point_color='b')
 
 valid_map_values = util.where_valid_redshifts(validation_results_no_spec_z['map'])
 all_galaxy_pairs, random_galaxy_pairs = galaxy_pairs.store_pairs_on_sky(data_no_spec_z['ra'].iloc[valid_map_values],
@@ -232,7 +254,7 @@ z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_ma
                                all_galaxy_pairs_read_in, random_galaxy_pairs_read_in,
                                show_fig=False,
                                save_name='./plots/' + run_super_name + '/' + run_name + '/pairs_all.png',
-                               plt_title=run_name + '-- z {:.2f} to {:.2f}'.format(min_z, max_z))
+                               plt_title=None)
 
 
 # Initialise twitter
@@ -333,7 +355,28 @@ z_plot.density_plot(data_validation['sed_log_mass'], data_validation['sed_log_sf
                     x_label=r'$log(M_{stars})$', y_label=r'$log(SFR)$', grid_resolution=15, n_levels=20,
                     plt_title='SFR vs log stellar mass: validation dataset', point_alpha=0.2,
                     save_name=run_dir + 'sfr_vs_mstars_valid.png')
+"""
+"""
+# Save stuff to csv!
+to_csv = [data_training, data_validation, data_no_spec_z, validation_results, validation_results_no_spec_z]
+to_name = ['data_training', 'data_validation', 'data_no_spec_z', 'validation_results', 'validation_results_no_spec_z']
+for name, csv_me in zip(to_name, to_csv):
+    csv_me.to_csv('./final_run_data/' + name + '.csv')
+    print('Successfully saved {}'.format(name))
 
+# Pickle some other stuff!
+import pickle
+to_pickle = [validation_mixtures, validation_mixtures_no_spec_z]
+to_name = ['validation_mixtures', 'validation_mixtures_no_spec_z']
+for name, pickle_me in zip(to_name, to_pickle):
+    with open('./final_run_data/' + name + '.pkl', 'wb') as f:
+        pickle.dump(pickle_me, f, pickle.HIGHEST_PROTOCOL)
+    print('Successfully saved {}'.format(name))
+
+# NB to open again:
+# with open('name.pkl', 'wb') as f:
+#     thing = pickle.load(f)
+"""
 
 
 """

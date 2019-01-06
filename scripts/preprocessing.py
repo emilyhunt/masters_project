@@ -424,6 +424,10 @@ class PhotometryScaler:
             np.where(self.photometry_stats[['minimum_flux', 'minimum_sn']] > 0, 0.,
                      self.photometry_stats[['minimum_flux', 'minimum_sn']] - 0.0001)
 
+        # Some placeholders for scaling
+        self.training_data_means = np.nan
+        self.training_data_std_deviations = np.nan
+
     @staticmethod
     def train_validation_split(data, training_set_size: float=0.75, seed: Optional[int]=42):
         """Randomly shuffles and splits the dataset into a training set and a validation set. Preferable for use over
@@ -453,6 +457,21 @@ class PhotometryScaler:
         training_data = data.iloc[data_indices[:training_data_size]].reset_index(drop=True)
         validation_data = data.iloc[data_indices[training_data_size:]].reset_index(drop=True)
         return [training_data, validation_data]
+
+    def scale_fit(self, data, flux_keys: list, error_keys: list):
+        """My own copy of scipy's standard scaler, but I know how it works!"""
+        # todo: docs
+        # Store the means and standard deviations
+        self.training_data_means = np.mean(data[flux_keys + error_keys], axis=0)
+        self.training_data_std_deviations = np.std(data[flux_keys + error_keys], axis=0)
+
+    def scaling_transform(self, data, flux_keys: list, error_keys: list):
+        """My own copy of scipy's standard scaler continued"""
+        # todo: docs
+        # Subtract the means and divide by the standard deviations so that data ~ N(mu=0, sigma=1)
+        data[flux_keys + error_keys] = ((data[flux_keys + error_keys] - self.training_data_means)
+                                        / self.training_data_std_deviations)
+        return data
 
     def enlarge_dataset_within_error(self, data, flux_keys: list, error_keys: list,
                                      min_sn: float = 1.0, max_sn: float = 2.0,
@@ -711,7 +730,6 @@ class PhotometryScaler:
 
         # Cycle over flux bands
         for a_flux_key in flux_keys:
-
             # Check we haven't been passed any incorrect values (that would fuck the log right up lol)
             bad_fluxes = np.count_nonzero(np.where(data[a_flux_key] == -99., True, False))
             if bad_fluxes > 0:
@@ -741,7 +759,9 @@ class PhotometryScaler:
         # Now, let's grab how much we need to change zero_band fluxes/magnitudes by to make them all zero
         conversion_amount = -1 * data[zero_band].values
 
-        # And lastly, apply this to every flux band
+        # And lastly, apply this to every flux band other than the zero band  # todo: or maybe not the zero band
+        flux_keys = flux_keys.copy()
+        flux_keys.remove(zero_band)
         data[flux_keys] = data[flux_keys].values + conversion_amount.reshape(-1, 1)
 
         return data

@@ -11,8 +11,8 @@ from typing import Optional, Union
 from scipy.stats import norm as scipy_normal
 
 # Make TeX labels work on plots
-#rc('font', **{'family': 'serif', 'serif': ['Palatino']})
-#rc('text', usetex=True)
+plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
+plt.rc('text', usetex=True)
 from scripts.util import single_gaussian_to_fit, double_gaussian_to_fit, fit_gaussians
 
 
@@ -21,9 +21,10 @@ plt.ioff()
 
 
 def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins: int=5, point_alpha: float=0.2,
-                 point_color='r', limits=None,
+                 point_color='r', limits=None, show_5_sigma: Optional[float]=None,
                  plt_title: Optional[str]=None, save_name: Optional[str]=None, show_fig: bool=False,
-                 validity_condition: str='greater_than_zero'):
+                 validity_condition: str='greater_than_zero', figsize=(6.2, 3), plot_extra_axes=True,
+                 x_label=r'$z_{spec}$', y_label=r'$z_{ML}$', set_nmad_old_value=False):
     """Plots photometric redshift against spectroscopic for analysis. Also makes a plot of binned NMAD and median
     values, and makes a plot of zphot - zspec / (1 + zspec) for analysis.
     
@@ -53,10 +54,14 @@ def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins
     photometric_z = np.asarray(photometric_z)[valid]
 
     # Figure and axis setup
-    fig = plt.figure(figsize=(7.48, 4))
-    ax_spec_phot = fig.add_subplot(1, 2, 1)  # n_rows, n_cols, axis_number
-    ax_nmad = fig.add_subplot(2, 2, 2)
-    ax_delta_z = fig.add_subplot(2, 2, 4, sharex=ax_nmad)
+    fig = plt.figure(figsize=figsize)
+
+    if plot_extra_axes:
+        ax_spec_phot = fig.add_subplot(1, 2, 1)  # n_rows, n_cols, axis_number
+        ax_nmad = fig.add_subplot(2, 2, 2)
+        ax_delta_z = fig.add_subplot(2, 2, 4, sharex=ax_nmad)
+    else:
+        ax_spec_phot = fig.add_subplot(1, 1, 1)
 
     # LEFT PLOT - inferred/photometric redshifts vs true/spectroscopic redshifts.
     # Begin by plotting things:
@@ -64,86 +69,274 @@ def phot_vs_spec(spectroscopic_z, photometric_z, show_nmad: bool=True, nmad_bins
     ax_spec_phot.plot([-1, 10], [-1, 10], 'k--', lw=1)
 
     # Add the NMAD to the plot if it has been specified by the user
-    if show_nmad is True:
+    if show_nmad is True and show_5_sigma is None:
         overall_nmad = util.calculate_nmad(spectroscopic_z, photometric_z)
         ax_spec_phot.text(0.05, 0.95, 'NMAD = {:.4f}'.format(overall_nmad),
                      ha='left', va='center', transform=ax_spec_phot.transAxes, fontsize=8,
                      bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
+
+    # We can add the fraction of 5 sigma outliers too if the user wants!
+    elif show_nmad is True and show_5_sigma is not None:
+        overall_nmad = util.calculate_nmad(spectroscopic_z, photometric_z)
+
+        if set_nmad_old_value:
+            overall_nmad = 0.0208
+            show_5_sigma = 0.0697
+
+        ax_spec_phot.text(0.05, 0.95,
+                          r'$\sigma_{NMAD} = $' + ' {:.4f}'.format(overall_nmad) + '\n'
+                          + r'$\mathcal{F}_{5\sigma} = $' + ' {:.4f}'.format(show_5_sigma),
+                     ha='left', va='top', transform=ax_spec_phot.transAxes, fontsize=8,
+                     bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0),))
+
     else:
         overall_nmad = None
 
-    # RIGHT PLOT 1 - NMAD vs redshift
-    # Begin by sorting the redshifts into spectroscopic order
-    sort_indices = np.argsort(spectroscopic_z)
-    spec_sorted = spectroscopic_z[sort_indices]
-    phot_sorted = photometric_z[sort_indices]
+    if plot_extra_axes:
+        # RIGHT PLOT 1 - NMAD vs redshift
+        # Begin by sorting the redshifts into spectroscopic order
+        sort_indices = np.argsort(spectroscopic_z)
+        spec_sorted = spectroscopic_z[sort_indices]
+        phot_sorted = photometric_z[sort_indices]
 
-    # Now, split them into nmad_bins groups
-    bin_size = spec_sorted.size // nmad_bins
-    bin_mean_x_values = np.zeros(nmad_bins, dtype=np.float)
-    bin_range = np.zeros((2, nmad_bins), dtype=np.float)
-    binned_nmads = np.zeros(nmad_bins, dtype=np.float)
-    binned_median_delta_z = np.zeros(nmad_bins, dtype=np.float)
+        # Now, split them into nmad_bins groups
+        bin_size = spec_sorted.size // nmad_bins
+        bin_mean_x_values = np.zeros(nmad_bins, dtype=np.float)
+        bin_range = np.zeros((2, nmad_bins), dtype=np.float)
+        binned_nmads = np.zeros(nmad_bins, dtype=np.float)
+        binned_median_delta_z = np.zeros(nmad_bins, dtype=np.float)
 
-    # Loop over each bin and calculate the NMAD for that range
-    i = 0
-    while i < nmad_bins:
-        start_index = i * bin_size
-        end_index = (i+1) * bin_size
+        # Loop over each bin and calculate the NMAD for that range
+        i = 0
+        while i < nmad_bins:
+            start_index = i * bin_size
+            end_index = (i+1) * bin_size
 
-        # Set end index to be the last value if we're on the last bin, to deal with remainders in the bin size integer
-        # division
-        if i == nmad_bins - 1:
-            end_index = spec_sorted.size - 1
+            # Set end index to be the last value if we're on the last bin, to deal with remainders in the bin size integer
+            # division
+            if i == nmad_bins - 1:
+                end_index = spec_sorted.size - 1
 
-        # Calculate the NMAD here
-        binned_nmads[i] = util.calculate_nmad(spec_sorted[start_index:end_index],
-                                              phot_sorted[start_index:end_index])
-        binned_median_delta_z[i] = np.median((phot_sorted[start_index:end_index] - spec_sorted[start_index:end_index])
-                                      / (1 + spec_sorted[start_index:end_index]))
+            # Calculate the NMAD here
+            binned_nmads[i] = util.calculate_nmad(spec_sorted[start_index:end_index],
+                                                  phot_sorted[start_index:end_index])
+            binned_median_delta_z[i] = np.median((phot_sorted[start_index:end_index] - spec_sorted[start_index:end_index])
+                                          / (1 + spec_sorted[start_index:end_index]))
 
-        # Store some extra stuff
-        bin_mean_x_values[i] = np.mean(spec_sorted[start_index:end_index])
-        bin_range[:, i] = np.abs(np.array([spec_sorted[start_index], spec_sorted[end_index]]) - bin_mean_x_values[i])
+            # Store some extra stuff
+            bin_mean_x_values[i] = np.mean(spec_sorted[start_index:end_index])
+            bin_range[:, i] = np.abs(np.array([spec_sorted[start_index], spec_sorted[end_index]]) - bin_mean_x_values[i])
 
-        i += 1
+            i += 1
 
-    ax_nmad.errorbar(bin_mean_x_values, binned_nmads, xerr=bin_range, fmt='ks', ms=3, label='NMAD')
-    ax_nmad.errorbar(bin_mean_x_values, binned_median_delta_z, xerr=bin_range, fmt='bs', ms=3,
-                     label='Median $\Delta z$')
-    ax_nmad.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
+        ax_nmad.errorbar(bin_mean_x_values, binned_nmads, xerr=bin_range, fmt='r+', ms=3, label=r'$\sigma_{NMAD}$')
+        ax_nmad.errorbar(bin_mean_x_values, binned_median_delta_z, xerr=bin_range, fmt='b+', ms=3,
+                         label='Median $\Delta z$')
+        ax_nmad.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
 
-    # RIGHT PLOT 2 - Evolution of deltaZ / (1 + z) and binned NMADs
-    delta_z = (photometric_z - spectroscopic_z) / (1 + spectroscopic_z)
-    ax_delta_z.plot(spectroscopic_z, delta_z, '.', color=point_color, ms=2, alpha=point_alpha)
+        # RIGHT PLOT 2 - Evolution of deltaZ / (1 + z) and binned NMADs
+        delta_z = (photometric_z - spectroscopic_z) / (1 + spectroscopic_z)
+        ax_delta_z.plot(spectroscopic_z, delta_z, '.', color=point_color, ms=2, alpha=point_alpha)
 
-    # todo: make this prettier with a density plot. looks hard sadly. try using e.g.:
-    # contour_plot = ax_delta_z.contourf(spectroscopic_z, delta_z, cmap='magma')
-    # fig.colorbar(contour_plot)
+        # todo: make this prettier with a density plot. looks hard sadly. try using e.g.:
+        # contour_plot = ax_delta_z.contourf(spectroscopic_z, delta_z, cmap='magma')
+        # fig.colorbar(contour_plot)
 
-    ax_delta_z.plot([-1, 10], [0, 0], 'k--', lw=1)
+        ax_delta_z.plot([-1, 10], [0, 0], 'k--', lw=1)
 
     # Set limits and labels
     if limits is not None:
         ax_spec_phot.set_xlim(limits[0], limits[1])
-        ax_nmad.set_xlim(limits[0], limits[1])
+
+        if plot_extra_axes:
+            ax_nmad.set_xlim(limits[0], limits[1])
+
         ax_spec_phot.set_ylim(limits[0], limits[1])
-    ax_spec_phot.set_xlabel(r'$z_{spec}$')
-    ax_spec_phot.set_ylabel(r'$z_{phot}$')
 
-    ax_nmad.set_ylabel(r'NMAD, median $\Delta z / ( 1 + z_{spec})$')
-    ax_delta_z.set_xlabel(r'$z_{spec}$')
-    ax_delta_z.set_ylabel(r'$\Delta z / ( 1 + z_{spec})$')
+    ax_spec_phot.set_xlabel(x_label)
+    ax_spec_phot.set_ylabel(y_label)
 
-    # Fix possible spacing issues between left and right subplots
-    fig.subplots_adjust(wspace=0.3)
+    if plot_extra_axes:
+        ax_nmad.set_ylabel(r'$\sigma_{NMAD}$')
+        ax_delta_z.set_xlabel(x_label)
+        ax_delta_z.set_ylabel(r'$\Delta z / ( 1 + z_{spec})$')
 
-    # Output time
+        # Fix possible spacing issues between left and right subplots
+        fig.subplots_adjust(wspace=0.3)
+
+    # OUTPUT TIME
+    # Stop the figure object from clipping labels
+    fig.tight_layout()
+
     if plt_title is not None:
         ax_spec_phot.set_title(plt_title)
 
     if save_name is not None:
-        fig.savefig(save_name)
+        fig.savefig(save_name, dpi=600)
+
+    if show_fig:
+        fig.show()
+    else:
+        plt.close(fig)
+
+    return overall_nmad
+
+
+def phot_vs_spec_2(spectroscopic_z, photometric_z, show_nmad: bool = True, nmad_bins: int = 5, point_alpha: float = 0.2,
+                   point_color='r', limits=None, show_5_sigma: Optional[float] = None,
+                   plt_title: Optional[str] = None, save_name: Optional[str] = None, show_fig: bool = False,
+                   validity_condition: str = 'greater_than_zero', figsize=(3, 5), plot_extra_axes=True,
+                   x_label=r'$z_{spec}$', y_label=r'$z_{ML}$'):
+    """Plots photometric redshift against spectroscopic for analysis. Also makes a plot of binned NMAD and median
+    values, and makes a plot of zphot - zspec / (1 + zspec) for analysis.
+    
+    THIS VERSION IS MODIFIED TO LOOK DIFFERENT FOR THE SAKE OF THE FINAL REPORT :)
+
+    Args:
+        Function-specific:
+            spectroscopic_z (array-like): true redshifts to plot.
+            photometric_z (array-like): inferred redshifts to plot.
+            show_nmad (bool): whether or not to plot the nmad. Default is true.
+            point_alpha (float): alpha of points to plot. Default is 0.2.
+            point_color (matplotlib color): color of the points. Default is red ('r').
+            limits (None or array-like): x and y limits of redshift range. Default is None.
+
+        Module-common:
+            plt_title (None or bool): title for the plot.
+            save_name (None or str): name of plot to save.
+            show_fig (bool): whether or not to show the plot.
+            validity_condition (str): validity condition to pass to util.where_valid_redshifts().
+
+    Returns:
+        the best plot ever, and also the NMAD
+
+    """  # todo this fn needs updating
+
+    # Find valid redshifts and cast the arrays as only being said valid redshifts
+    valid = util.where_valid_redshifts(spectroscopic_z, photometric_z, validity_condition=validity_condition)
+    spectroscopic_z = np.asarray(spectroscopic_z)[valid]
+    photometric_z = np.asarray(photometric_z)[valid]
+
+    # Figure and axis setup
+    fig = plt.figure(figsize=figsize)
+
+    if plot_extra_axes:
+        ax_spec_phot = fig.add_subplot(2, 1, 1)  # n_rows, n_cols, axis_number
+        ax_nmad = fig.add_subplot(4, 1, 3, sharex=ax_spec_phot)
+        ax_delta_z = fig.add_subplot(4, 1, 4, sharex=ax_spec_phot)
+    else:
+        ax_spec_phot = fig.add_subplot(1, 1, 1)
+
+    # LEFT PLOT - inferred/photometric redshifts vs true/spectroscopic redshifts.
+    # Begin by plotting things:
+    ax_spec_phot.plot(spectroscopic_z, photometric_z, '.', color=point_color, ms=2, alpha=point_alpha)
+    ax_spec_phot.plot([-1, 10], [-1, 10], 'k--', lw=1)
+
+    # Add the NMAD to the plot if it has been specified by the user
+    if show_nmad is True and show_5_sigma is None:
+        overall_nmad = util.calculate_nmad(spectroscopic_z, photometric_z)
+        ax_spec_phot.text(0.05, 0.95, 'NMAD = {:.4f}'.format(overall_nmad),
+                          ha='left', va='center', transform=ax_spec_phot.transAxes, fontsize=8,
+                          bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0), ))
+
+    # We can add the fraction of 5 sigma outliers too if the user wants!
+    elif show_nmad is True and show_5_sigma is not None:
+        overall_nmad = util.calculate_nmad(spectroscopic_z, photometric_z)
+        ax_spec_phot.text(0.95, 0.05,
+                          r'$\sigma_{NMAD} = $' + ' {:.4f}'.format(overall_nmad) + '\n'
+                          + r'$\mathcal{F}_{5\sigma} = $' + ' {:.4f}'.format(show_5_sigma),
+                          ha='right', va='bottom', transform=ax_spec_phot.transAxes, fontsize=8,
+                          bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0), ))
+
+    else:
+        overall_nmad = None
+
+    if plot_extra_axes:
+        # RIGHT PLOT 1 - NMAD vs redshift
+        # Begin by sorting the redshifts into spectroscopic order
+        sort_indices = np.argsort(spectroscopic_z)
+        spec_sorted = spectroscopic_z[sort_indices]
+        phot_sorted = photometric_z[sort_indices]
+
+        # Now, split them into nmad_bins groups
+        bin_size = spec_sorted.size // nmad_bins
+        bin_mean_x_values = np.zeros(nmad_bins, dtype=np.float)
+        bin_range = np.zeros((2, nmad_bins), dtype=np.float)
+        binned_nmads = np.zeros(nmad_bins, dtype=np.float)
+        binned_median_delta_z = np.zeros(nmad_bins, dtype=np.float)
+
+        # Loop over each bin and calculate the NMAD for that range
+        i = 0
+        while i < nmad_bins:
+            start_index = i * bin_size
+            end_index = (i + 1) * bin_size
+
+            # Set end index to be the last value if we're on the last bin, to deal with remainders in the bin size integer
+            # division
+            if i == nmad_bins - 1:
+                end_index = spec_sorted.size - 1
+
+            # Calculate the NMAD here
+            binned_nmads[i] = util.calculate_nmad(spec_sorted[start_index:end_index],
+                                                  phot_sorted[start_index:end_index])
+            binned_median_delta_z[i] = np.median(
+                (phot_sorted[start_index:end_index] - spec_sorted[start_index:end_index])
+                / (1 + spec_sorted[start_index:end_index]))
+
+            # Store some extra stuff
+            bin_mean_x_values[i] = np.mean(spec_sorted[start_index:end_index])
+            bin_range[:, i] = np.abs(
+                np.array([spec_sorted[start_index], spec_sorted[end_index]]) - bin_mean_x_values[i])
+
+            i += 1
+
+        ax_nmad.errorbar(bin_mean_x_values, binned_nmads, xerr=bin_range, fmt='r+', ms=3, label=r'$\sigma_{NMAD}$')
+        ax_nmad.errorbar(bin_mean_x_values, binned_median_delta_z, xerr=bin_range, fmt='b+', ms=3,
+                         label='Median $\Delta z$')
+        ax_nmad.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
+
+        # RIGHT PLOT 2 - Evolution of deltaZ / (1 + z) and binned NMADs
+        delta_z = (photometric_z - spectroscopic_z) / (1 + spectroscopic_z)
+        ax_delta_z.plot(spectroscopic_z, delta_z, '.', color=point_color, ms=2, alpha=point_alpha)
+
+        # todo: make this prettier with a density plot. looks hard sadly. try using e.g.:
+        # contour_plot = ax_delta_z.contourf(spectroscopic_z, delta_z, cmap='magma')
+        # fig.colorbar(contour_plot)
+
+        ax_delta_z.plot([-1, 10], [0, 0], 'k--', lw=1)
+
+    # Set limits and labels
+    if limits is not None:
+        ax_spec_phot.set_xlim(limits[0], limits[1])
+
+        if plot_extra_axes:
+            ax_nmad.set_xlim(limits[0], limits[1])
+
+        ax_spec_phot.set_ylim(limits[0], limits[1])
+
+    ax_spec_phot.set_ylabel(y_label)
+
+    if plot_extra_axes:
+        ax_nmad.set_ylabel(r'$\sigma_{NMAD}$')
+        ax_delta_z.set_xlabel(x_label)
+        ax_delta_z.set_ylabel(r'$\Delta z / ( 1 + z_{spec})$')
+
+        # Fix possible spacing issues between left and right subplots
+        fig.subplots_adjust(hspace=0)
+        plt.setp([a.get_xticklabels() for a in fig.axes[:-1]], visible=False)
+
+    else:
+        ax_spec_phot.set_xlabel(x_label)
+
+    # OUTPUT TIME
+    # Stop the figure object from clipping labels
+    #fig.tight_layout()
+
+    if plt_title is not None:
+        ax_spec_phot.set_title(plt_title)
+
+    if save_name is not None:
+        fig.savefig(save_name, dpi=600)
 
     if show_fig:
         fig.show()
@@ -674,12 +867,6 @@ if __name__ == '__main__':
     redshifts['gs4_ra'] = coords['gs4_ra']
     redshifts['gs4_dec'] = coords['gs4_dec']
 
-    # Calculate the NMAD
-    my_nmad = util.calculate_nmad(redshifts['gs4_zspec'], redshifts['gs4_zphot'])
-
-    # Make a plot of the photometric redshifts against spectroscopic
-    phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], show_nmad=True, show_fig=True, limits=[0, 7])
-
     # Remove everything within specific sky co-ordinates
     #redshifts = redshifts.iloc[redshifts.gs4_ra.values < 53.1]
 
@@ -696,17 +883,21 @@ if __name__ == '__main__':
     # Try reading in the pairs again to check the storing worked
     max_z = 100.0
     min_z = 0.0
-    all_galaxy_pairs_read_in = scripts.galaxy_pairs.read_pairs('./data/all_pairs.csv', redshifts['gs4_zphot'],
-                                                               min_redshift=min_z, max_redshift=max_z)
+    #all_galaxy_pairs_read_in = scripts.galaxy_pairs.read_pairs('./data/all_pairs.csv', redshifts['gs4_zphot'],
+    #                                                           min_redshift=min_z, max_redshift=max_z)
 
-    random_galaxy_pairs_read_in = scripts.galaxy_pairs.read_pairs('./data/random_pairs.csv', redshifts['gs4_zphot'],
-                                                                  min_redshift=min_z, max_redshift=max_z,
-                                                                  size_of_random_catalogue=random_catalogue_repeats)
+    #random_galaxy_pairs_read_in = scripts.galaxy_pairs.read_pairs('./data/random_pairs.csv', redshifts['gs4_zphot'],
+    #                                                              min_redshift=min_z, max_redshift=max_z,
+    #                                                              size_of_random_catalogue=random_catalogue_repeats)
 
     # Make a plot of Npairs against deltaZ
     #pair_redshift_deviation(redshifts['gs4_zphot'], all_galaxy_pairs_read_in, random_galaxy_pairs_read_in,
     #                        size_of_random_catalogue=random_catalogue_repeats, show_fig=True)
 
     # Test how good or bad the error estimates are
-    error_evaluator(redshifts['gs4_zspec'], redshifts['gs4_zphot'],
-                    redshifts['gs4_zphot_l68'], redshifts['gs4_zphot_u68'], show_fig=True, limits=[-5, 5])
+    sigma_3, sigma_5 = error_evaluator(redshifts['gs4_zspec'], redshifts['gs4_zphot'],
+                    redshifts['gs4_zphot_l68'], redshifts['gs4_zphot_u68'], show_fig=False, limits=[-5, 5])
+
+    # Make a plot of the photometric redshifts against spectroscopic
+    phot_vs_spec(redshifts['gs4_zspec'], redshifts['gs4_zphot'], show_nmad=True, show_fig=True, limits=[0, 7],
+                 show_5_sigma=sigma_5/100, save_name='./final_plots/eazy_phot_vs_spec.pgf', nmad_bins=10)
