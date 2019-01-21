@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm as scipy_normal
 
 # Make TeX labels work on plots
-plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
-plt.rc('text', usetex=True)
+#plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
+#plt.rc('text', usetex=True)
 
 # Grab some data
 data_train = pd.read_csv('./final_run_data/data_training.csv')
@@ -84,20 +84,22 @@ ax_wittman.plot(cdfs_sorted, cdfs_summed, 'b--', label=r'$SNR \cdot 0.25$', alph
 
 #####################################
 
-ax_wittman.text(0.45, 0.02,
+ax_wittman.text(0.35, 0.02,
         'KS test at:           \n' + r'$SNR \cdot 1.00$' + ' = {:.5f}'.format(max_residual_0)
         + '\n' + r'$SNR \cdot 0.25$' + ' = {:.5f}'.format(max_residual_4),
         ha='left', va='bottom', transform=ax_wittman.transAxes, fontsize=8,)
         # bbox=dict(boxstyle='round', ec=(0.0, 0.0, 0.0), fc=(1., 1.0, 1.0), ))
 
 # Labels
-ax_wittman.set_xlabel(r'$c_i$')
-ax_wittman.set_ylabel(r'$F(c_i)$')
+#ax_wittman.set_xlabel(r'$c_i$')
+#ax_wittman.set_ylabel(r'$F(c_i)$')
+ax_wittman.set_xlabel('Confidence interval')
+ax_wittman.set_ylabel('Cumulative sum of conf. intervals')
 ax_wittman.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
 ax_wittman.set_xlim(0, 1)
 ax_wittman.set_ylim(0, 1)
 
 fig.tight_layout()
-fig.savefig('./final_plots/wittman.png', dpi=600)
+fig.savefig('./final_plots/pres_wittman.png', dpi=600)
 
 fig.show()

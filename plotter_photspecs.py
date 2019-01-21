@@ -15,6 +15,48 @@ data_test = pd.read_csv('./final_run_data/data_no_spec_z.csv')
 results_valid = pd.read_csv('./final_run_data/validation_results.csv')
 results_test = pd.read_csv('./final_run_data/validation_results_no_spec_z.csv')
 
+# FOR THE PRESENTATION
+# VALIDATION DATA PLOTS
+# For ML
+sigma_3, sigma_5 = z_plot.error_evaluator(data_valid['z_spec'], results_valid['map'],
+                                          results_valid['lower'], results_valid['upper'])
+
+z_plot.phot_vs_spec(data_valid['z_spec'], results_valid['map'], nmad_bins=10, limits=[0, 7], show_5_sigma=sigma_5/100,
+                    save_name='./final_plots/pres_ML_valid_phot_spec.png', show_fig=True, set_nmad_old_value=True,
+                    figsize=(3, 3),
+                    x_label=r'$z_{spectroscopic}$', y_label=r'$z_{ML}$', plot_extra_axes=False)
+
+# For EAZY
+sigma_3, sigma_5 = z_plot.error_evaluator(data_valid['z_spec'], data_valid['z_phot_lit'],
+                                          data_valid['z_phot_lit_l68'], data_valid['z_phot_lit_u68'])
+
+z_plot.phot_vs_spec(data_valid['z_spec'], data_valid['z_phot_lit'], nmad_bins=10, limits=[0, 7], show_5_sigma=sigma_5/100,
+                    save_name='./final_plots/pres_EAZY_valid_phot_spec.png', show_fig=True, point_color='b',
+                    figsize=(3, 3),
+                    x_label=r'$z_{spectroscopic}$', y_label=r'$z_{EAZY}$', plot_extra_axes=False)
+
+# For test data
+sigma_3, sigma_5 = z_plot.error_evaluator(data_test['z_phot_lit'], results_test['map'],
+                                          results_test['lower'], results_test['upper'])
+
+z_plot.phot_vs_spec(data_test['z_phot_lit'], results_test['map'], nmad_bins=10, limits=[0, 7], show_5_sigma=sigma_5/100,
+                    save_name='./final_plots/pres_ML_EAZY_test_phot_spec.png', show_fig=True, point_color='b', point_alpha=0.02,
+                    plot_extra_axes=False, figsize=(3, 3),
+                    x_label=r'$z_{EAZY}$', y_label=r'$z_{ML}$')
+
+# For data that hasn't been preprocessed
+data_valid = pd.read_csv('./final_run_data/different_sn_no_pp/data_validation_sn=0.0.csv')
+results_valid = pd.read_csv('./final_run_data/different_sn_no_pp/validation_results_sn=0.0.csv')
+
+sigma_3, sigma_5 = z_plot.error_evaluator(data_valid['z_spec'], results_valid['map'],
+                                          results_valid['lower'], results_valid['upper'])
+
+z_plot.phot_vs_spec(data_valid['z_spec'], results_valid['map'], nmad_bins=10, limits=[0, 7], show_5_sigma=sigma_5/100,
+                    save_name='./final_plots/pres_ML_valid_phot_spec_no_pp.png', show_fig=True, set_nmad_old_value=False,
+                    figsize=(3, 3),
+                    x_label=r'$z_{spectroscopic}$', y_label=r'$z_{ML}$', plot_extra_axes=False)
+
+"""
 
 # VALIDATION DATA PLOTS
 # For ML
@@ -40,3 +82,4 @@ z_plot.phot_vs_spec(data_test['z_phot_lit'], results_test['map'], nmad_bins=10, 
                     save_name='./final_plots/ML_EAZY_test_phot_spec.png', show_fig=True, point_color='b', point_alpha=0.02,
                     plot_extra_axes=False, figsize=(3, 3),
                     x_label=r'$z_{EAZY}$', y_label=r'$z_{ML}$')
+"""

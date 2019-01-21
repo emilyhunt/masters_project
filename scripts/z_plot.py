@@ -11,8 +11,8 @@ from typing import Optional, Union
 from scipy.stats import norm as scipy_normal
 
 # Make TeX labels work on plots
-plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
-plt.rc('text', usetex=True)
+#plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
+#plt.rc('text', usetex=True)
 from scripts.util import single_gaussian_to_fit, double_gaussian_to_fit, fit_gaussians
 
 

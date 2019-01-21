@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # Make TeX labels work on plots
-plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
-plt.rc('text', usetex=True)
+#plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
+#plt.rc('text', usetex=True)
 
 # Constants and shit
 grid_resolution = 20
@@ -126,7 +126,7 @@ ax = fig.add_subplot(1, 1, 1)
 density_plot_object = ax.imshow(np.flip(mean_z.T, axis=0),
                                 extent=[x.min() - 0.5*x_spacing, x.max() + 0.5*x_spacing,
                                         y.min() - 0.5*y_spacing, y.max() + 0.5*y_spacing],
-                                cmap=plt.get_cmap('coolwarm'))
+                                cmap=plt.get_cmap('coolwarm'), alpha=1)
 
 # Now, plot the training data's limits
 ax.contour(x_grid, y_grid, np.log(training_data_density.T + 1), 5, colors='k', linewidths=[2, 1, 1, 1, 1])
@@ -147,10 +147,10 @@ colorbar = fig.colorbar(density_plot_object, cax=cax, orientation='vertical')
 colorbar.set_label(r'$(z_{EAZY} - z_{ML}) \: / \: (1 + z_{EAZY})$')
 
 # Labels and legend
-ax.set_xlabel(r'$\log (M_{stars})$')
-ax.set_ylabel(r'$\log (SFR)$')
+ax.set_xlabel(r'$\log (M_{stars})$' + ' (stellar mass)')
+ax.set_ylabel(r'$\log (SFR)$' + ' (star formation rate)')
 #ax.legend(edgecolor='k', facecolor='w', fancybox=True, fontsize=8)
 
-fig.tight_layout()
-fig.savefig('./final_plots/sfr_vs_mass.png', dpi=600)
+#fig.tight_layout()
+fig.savefig('./final_plots/pres_2_sfr_vs_mass.png', dpi=600, bbox_inches='tight')
 fig.show()

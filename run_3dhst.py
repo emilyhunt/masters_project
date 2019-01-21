@@ -1,20 +1,15 @@
 """Trains a network on the real 3dhst good south data."""
 
-import numpy as np
 import os
-import pandas as pd
-import time
-
 import scripts.file_handling
+import numpy as np
 from scripts import preprocessing
 from scripts import mdn
 from scripts import loss_funcs
 from scripts import z_plot
 from scripts import util
 from scripts import galaxy_pairs
-from scripts import twitter
 from data import hst_goodss_config
-from sklearn.model_selection import train_test_split
 
 
 # Begin by reading in the data
@@ -88,7 +83,7 @@ y_train = data_training['z_spec'].values.reshape(-1, 1)
 
 # Make a network
 run_super_name = '18-12-27_very_long_runs'
-run_name = '13_repeat_of_9_for_more_mixtures'
+run_name = '14_intentionally_shit_data'
 
 run_dir = './plots/' + run_super_name + '/' + run_name + '/'  # Note: os.makedirs() won't accept pardirs like '..'
 
@@ -193,7 +188,7 @@ for a_sn in sn_multipliers:
 
 
 
-"""
+
 # Run the pair algorithm on everything that didn't have photometric redshifts
 network.set_validation_data(data_no_spec_z[keys_in_order], 0)
 validation_mixtures_no_spec_z = network.validate()
@@ -256,10 +251,7 @@ z_plot.pair_redshift_deviation(validation_results_no_spec_z['map'].iloc[valid_ma
                                save_name='./plots/' + run_super_name + '/' + run_name + '/pairs_all.png',
                                plt_title=None)
 
-
-# Initialise twitter
-#twit = twitter.TweetWriter()
-#twit.write(twitter.initial_text('on 3D-HST data with basic settings.'), reply_to=None)
+"""
 
 z_plot.population_histogram(data_no_spec_z['z_phot_lit'], bins='auto', color='b',
                             plt_title='Test data EAZY redshift distribution',

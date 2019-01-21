@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from scipy.stats import norm as scipy_normal
 
 # Make TeX labels work on plots
-plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
-plt.rc('text', usetex=True)
+#plt.rc('font', **{'family': 'serif', 'serif': ['DejaVu Sans']})
+#plt.rc('text', usetex=True)
 
 # Grab some data
 data_train = pd.read_csv('./final_run_data/data_training.csv')
@@ -228,7 +228,7 @@ plt.setp([a.get_xticklabels() for a in fig.axes[::2]], visible=False)
 
 # fig.tight_layout()
 
-fig.savefig('./final_plots/pdfs.png', dpi=600, bbox_inches='tight')
+fig.savefig('./final_plots/pres_pdfs.png', dpi=600, bbox_inches='tight')
 
 fig.show()
 
